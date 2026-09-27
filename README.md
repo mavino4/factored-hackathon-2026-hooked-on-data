@@ -106,6 +106,13 @@ make check                    # lint + tests (in-memory and SQLite)
 make test-postgres            # same storage tests against real Postgres (see above)
 ```
 
+## Observability
+
+- Logs are JSON on stdout; every line in a request carries `request_id` (also returned as the `X-Request-ID` header).
+- Prometheus metrics on the internal port `AIP_METRICS_PORT` (default 9090), including time-to-first-token, tokens, estimated cost, provider errors and breaker state. See [`docs/deploy.md`](docs/deploy.md#6-what-to-monitor).
+- `GET /readyz` checks the database; `GET /healthz` is liveness only.
+- `GET /v1/admin/usage?days=7` gives a daily usage and cost report, for users listed in `AIP_ADMIN_USERS`.
+
 ## Evals
 
 `evals/` holds a small quality baseline. The cases are placeholders; replace them with 20–50 real
@@ -124,5 +131,6 @@ cost. See [`evals/README.md`](evals/README.md).
 
 - Create the production OIDC application/API in your provider (Auth0 recommended) and set `AIP_OIDC_*`.
 - Always set `AIP_DATABASE_URL` in deployed environments. In-memory storage is for local dev only.
+- Deployment guide (Kubernetes manifests, CI, Cloud Run / ECS notes): [`docs/deploy.md`](docs/deploy.md).
 - Replace the example tools in `agent/tools.py` with real integrations, and build the approval flow for irreversible tools.
 - Check the Bedrock/Vertex model IDs in `llm/models.py` against your cloud accounts before enabling failover.

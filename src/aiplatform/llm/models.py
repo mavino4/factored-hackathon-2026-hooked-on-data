@@ -81,13 +81,15 @@ class Route:
     model: ModelProfile
     max_tokens: int
     effort: Effort | None = None  # ignored when the model doesn't support effort
+    # Give up on an attempt (and retry/fail over) if the provider sends nothing for this long.
+    first_event_timeout_s: float = 30.0
 
 
 # First versions run on the light model (Claude Haiku 4.5). To upgrade a route,
 # swap the model, e.g. Route("agent", OPUS_5, max_tokens=16_000, effort="high").
 ROUTES: dict[str, Route] = {
     "chat": Route("chat", HAIKU_4_5, max_tokens=4_096),
-    "agent": Route("agent", HAIKU_4_5, max_tokens=8_192),
+    "agent": Route("agent", HAIKU_4_5, max_tokens=8_192, first_event_timeout_s=60.0),
 }
 
 

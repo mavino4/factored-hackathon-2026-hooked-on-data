@@ -46,7 +46,7 @@ deploy/k8s/
 ```
 
 What's in the base:
-- Deployment: 2 replicas, rolling update with `maxUnavailable: 0`, liveness `/healthz`, readiness `/readyz`, 60 s grace period plus a 5 s preStop pause so SSE streams can drain, non-root, read-only root filesystem (`/tmp` is an emptyDir), all capabilities dropped, seccomp `RuntimeDefault`, Prometheus scrape annotations for `/metrics`.
+- Deployment: 2 replicas, rolling update with `maxUnavailable: 0`, liveness `/healthz`, readiness `/readyz`, 60 s grace period plus a 5 s preStop pause so SSE streams can drain, non-root, read-only root filesystem (`/tmp` is an emptyDir), all capabilities dropped, seccomp `RuntimeDefault`, Prometheus scrape annotations for the internal metrics port 9090 (`AIP_METRICS_PORT`). It is not exposed through the Service or Ingress, because metrics include usage and cost; the NetworkPolicy only lets the `monitoring` namespace reach it.
 - HPA 2–6 pods at 70% CPU with a slow scale-down (removing a pod cuts its open streams). PDB `minAvailable: 1`.
 - NetworkPolicy: ingress only from the `ingress-nginx` and `monitoring` namespaces on port 8000. Egress limited to DNS, 443 and 5432.
 - Ingress (ingress-nginx): buffering off, 300 s read/send timeouts, TLS via cert-manager (`cert-manager.io/cluster-issuer: letsencrypt-prod`, change to your issuer).
@@ -104,11 +104,19 @@ Both options handle scaling, TLS and patching for you. Choose Kubernetes only if
 
 ## 6. What to monitor
 
-From `/metrics` and the logs:
-- Availability and latency: HTTP 5xx rate, p95 latency per route, **time-to-first-token** for chat.
-- Model providers: error rate by provider/class, circuit-breaker state, retries and failovers.
-- Cost: tokens by route/model (input, output, cache read/write), daily cost from `/v1/admin/usage`.
-- Abuse and capacity: 429 (rate limit / quota) and 409 (concurrent reply) counts, pod CPU/memory, HPA replica count.
+From the metrics endpoint (port 9090) and the JSON logs (every line has `request_id`):
+
+| Metric | What it tells you |
+|---|---|
+| `aip_http_requests_total{route,status}`, `aip_http_response_start_seconds` | 5xx rate, latency per route (time until the SSE stream starts) |
+| `aip_llm_time_to_first_token_seconds{route,provider}` | how long users wait for the first word |
+| `aip_llm_errors_total{provider,kind}` | retries, timeouts (`kind="timeout"`, provider sent nothing within the route's first-event timeout), failovers |
+| `aip_llm_breaker_open{provider}` | provider currently considered down |
+| `aip_llm_tokens_total{kind}`, `aip_llm_cost_usd_total` | spend by route/model (list prices); daily report at `GET /v1/admin/usage` (users in `AIP_ADMIN_USERS`) |
+| `aip_llm_prompt_below_cache_minimum_total` | prompts too short for prompt caching to apply |
+| `aip_requests_rejected_total{reason}` | rate limit, token quota, concurrent reply (409) |
+
+Also watch pod CPU/memory and the HPA replica count.
 - Database: connections, slow queries, storage growth, backup success.
 
-Suggested alerts: 5xx > 2% for 5 min, p95 time-to-first-token > 10 s for 10 min, provider error rate > 10%, circuit breaker open, daily cost above budget, readiness failures, and failed backups.
+Suggested alerts: 5xx > 2% for 5 min, p95 `aip_llm_time_to_first_token_seconds` > 10 s for 10 min, provider error rate > 10%, `aip_llm_breaker_open == 1`, daily cost above budget, readiness failures, and failed backups.

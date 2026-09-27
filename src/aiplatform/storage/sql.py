@@ -105,6 +105,23 @@ class SqlUsageStore:
                 cache_write_tokens=event.cache_write_tokens,
                 created_at=datetime.fromtimestamp(self._clock(), UTC)))
 
+    async def daily_summary(self, days: int) -> list[dict]:
+        since = datetime.fromtimestamp(utc_day_start(self._clock()) - (days - 1) * 86_400, UTC)
+        u = usage_events.c
+        day = sa.func.date(u.created_at).label("day")
+        async with self._engine.connect() as db:
+            result = await db.execute(
+                sa.select(day, u.route, u.provider, u.model,
+                          sa.func.count().label("requests"),
+                          sa.func.sum(u.input_tokens).label("input_tokens"),
+                          sa.func.sum(u.output_tokens).label("output_tokens"),
+                          sa.func.sum(u.cache_read_tokens).label("cache_read_tokens"),
+                          sa.func.sum(u.cache_write_tokens).label("cache_write_tokens"))
+                .where(u.created_at >= since)
+                .group_by(day, u.route, u.provider, u.model)
+                .order_by(day.desc(), u.route, u.provider, u.model))
+            return [{**row._mapping, "day": str(row.day)} for row in result]
+
     async def tokens_used_today(self, user_id: str) -> int:
         since = datetime.fromtimestamp(utc_day_start(self._clock()), UTC)
         total = (usage_events.c.input_tokens + usage_events.c.output_tokens

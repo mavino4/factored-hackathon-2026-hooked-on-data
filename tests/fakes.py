@@ -1,5 +1,6 @@
 """A scripted stand-in for an Anthropic SDK async client (no network)."""
 
+import asyncio
 from types import SimpleNamespace
 
 import anthropic
@@ -37,6 +38,13 @@ class MidStreamFailure:
         self.texts, self.error = texts, error
 
 
+class Stall:
+    """Send nothing for ``seconds`` (a stalled provider), then reply with ``outcome``."""
+
+    def __init__(self, seconds: float, outcome):
+        self.seconds, self.outcome = seconds, outcome
+
+
 class _Stream:
     def __init__(self, outcome):
         self._outcome = outcome
@@ -50,6 +58,9 @@ class _Stream:
         return False
 
     async def __aiter__(self):
+        if isinstance(self._outcome, Stall):
+            await asyncio.sleep(self._outcome.seconds)
+            self._outcome = self._outcome.outcome
         if isinstance(self._outcome, MidStreamFailure):
             for t in self._outcome.texts:
                 yield SimpleNamespace(type="text", text=t)

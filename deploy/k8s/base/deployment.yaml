@@ -21,7 +21,7 @@ spec:
         app.kubernetes.io/component: api
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8000"
+        prometheus.io/port: "9090"
         prometheus.io/path: /metrics
     spec:
       # Long enough for in-flight SSE streams to finish during a rollout.
@@ -49,6 +49,9 @@ spec:
           ports:
             - name: http
               containerPort: 8000
+            # Prometheus metrics; internal only (not in the Service/Ingress).
+            - name: metrics
+              containerPort: 9090
           envFrom:
             - configMapRef:
                 name: aiplatform-config

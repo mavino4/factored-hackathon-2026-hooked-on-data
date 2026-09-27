@@ -1,16 +1,23 @@
 """HTTP API: conversations, streamed chat turns (SSE) and agent runs."""
 
+import asyncio
 import json
 import logging
+import re
+import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 import anthropic
+import sqlalchemy as sa
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from prometheus_client import start_http_server
 from pydantic import BaseModel, Field
 
+from aiplatform import metrics
 from aiplatform.agent.actions import ActionNotPending, InMemoryActionStore
 from aiplatform.agent.loop import (
     AgentDone,
@@ -27,8 +34,9 @@ from aiplatform.chat.repository import ConversationNotFound, InMemoryConversatio
 from aiplatform.chat.service import ChatService, ConversationTooLong, NothingToRegenerate
 from aiplatform.config import Settings, get_settings
 from aiplatform.llm.gateway import AIGateway, Completed, GatewayError, TextDelta
+from aiplatform.llm.models import prices_for
 from aiplatform.llm.providers import build_clients, close_clients
-from aiplatform.logging import configure_logging
+from aiplatform.logging import configure_logging, request_id
 from aiplatform.ratelimit import RateLimiter
 from aiplatform.storage.sql import (
     SqlActionStore,
@@ -76,6 +84,11 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             repo, usage = InMemoryConversationRepository(), InMemoryUsageStore()
             actions = InMemoryActionStore()
         inflight = InFlight()
+        metrics_server = None
+        if settings.metrics_port:
+            metrics_server, _ = start_http_server(settings.metrics_port)
+        app.state.engine = engine
+        app.state.usage = usage
         app.state.repo = repo
         app.state.actions = actions
         app.state.inflight = inflight
@@ -85,12 +98,34 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         app.state.agent = AgentRunner(gw, repo, usage, inflight, actions,
                                       tools if tools is not None else DEFAULT_TOOLS)
         yield
+        if metrics_server is not None:
+            metrics_server.shutdown()
         if clients:
             await close_clients(clients)
         if engine is not None:
             await engine.dispose()
 
     app = FastAPI(title="AI Platform", version="0.1.0", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def observe(request: Request, call_next):
+        incoming = request.headers.get("x-request-id", "")
+        rid = incoming if _REQUEST_ID.fullmatch(incoming) else uuid.uuid4().hex
+        token = request_id.set(rid)
+        started = time.perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            response.headers["X-Request-ID"] = rid
+            return response
+        finally:
+            route = request.scope.get("route")
+            path = getattr(route, "path", "unmatched")  # template, not raw path: bounded labels
+            metrics.HTTP_REQUESTS.labels(request.method, path, str(status)).inc()
+            metrics.HTTP_LATENCY.labels(request.method, path).observe(
+                time.perf_counter() - started)
+            request_id.reset(token)
 
     if settings.auth_mode == "dev":
         verifier = None
@@ -119,8 +154,10 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
     async def admit(request: Request, user_id: Annotated[str, Depends(current_user)]) -> str:
         state = request.app.state
         if not state.limiter.allow(user_id):
+            metrics.REJECTED.labels("rate_limit").inc()
             raise HTTPException(429, "too many requests", headers={"Retry-After": "5"})
         if await state.quota.exceeded(user_id):
+            metrics.REJECTED.labels("token_quota").inc()
             raise HTTPException(429, "daily token quota exceeded")
         return user_id
 
@@ -135,12 +172,45 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         if conv.kind != kind:
             raise HTTPException(409, f"this is a {conv.kind} conversation")
         if request.app.state.inflight.is_busy(conv.id):
+            metrics.REJECTED.labels("busy").inc()
             raise HTTPException(409, "a reply is already in progress")
         return conv
 
     @app.get("/healthz")
     async def healthz() -> dict:
+        """Liveness: the process is up. No dependency checks."""
         return {"status": "ok"}
+
+    @app.get("/readyz")
+    async def readyz(request: Request):
+        """Readiness: can serve traffic (database reachable when configured)."""
+        engine = request.app.state.engine
+        if engine is not None:
+            try:
+                async with asyncio.timeout(2):
+                    async with engine.connect() as db:
+                        await db.execute(sa.text("SELECT 1"))
+            except Exception:
+                log.warning("readiness check failed: database unreachable", exc_info=True)
+                return JSONResponse({"status": "unavailable", "database": "down"}, 503)
+        return {"status": "ok"}
+
+    @app.get("/v1/admin/usage")
+    async def admin_usage(request: Request, user_id: Annotated[str, Depends(current_user)],
+                          days: int = Query(7, ge=1, le=90)) -> dict:
+        if user_id not in settings.admin_users:
+            raise HTTPException(403, "admin only")
+        rows = await request.app.state.usage.daily_summary(days)
+        if rows is None:
+            raise HTTPException(501, "usage history needs a database (AIP_DATABASE_URL)")
+        for row in rows:
+            row["cost_usd"] = round(prices_for(row["model"]).cost(
+                input_tokens=row["input_tokens"], output_tokens=row["output_tokens"],
+                cache_read_tokens=row["cache_read_tokens"],
+                cache_write_tokens=row["cache_write_tokens"]), 6)
+        return {"days": days, "rows": rows,
+                "total_cost_usd": round(sum(r["cost_usd"] for r in rows), 6),
+                "note": "Estimated from list prices; local models count as $0."}
 
     @app.post("/v1/conversations", status_code=201)
     async def create_conversation(body: NewConversation, request: Request,
@@ -197,6 +267,9 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             user_id, conv.id, action_id, approve=body.decision == "approve"))
 
     return app
+
+
+_REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
 def _summary(conv) -> dict:

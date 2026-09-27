@@ -7,6 +7,7 @@ circuit breaking, failover, prompt-cache breakpoints and usage logging.
 import asyncio
 import copy
 import logging
+import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
@@ -14,8 +15,9 @@ from typing import Any
 
 from anthropic.types import Message
 
+from aiplatform import metrics
 from aiplatform.config import Settings
-from aiplatform.llm.models import Route
+from aiplatform.llm.models import Route, prices_for
 from aiplatform.llm.resilience import (
     CircuitBreaker,
     Disposition,
@@ -128,18 +130,30 @@ class AIGateway:
                 if not breaker.acquire():
                     break
                 emitted = False
+                started = time.perf_counter()
                 try:
-                    async with client.messages.stream(**params) as stream:
-                        async for event in stream:
-                            if event.type == "text":
-                                emitted = True
-                                yield TextDelta(event.text)
-                        message = await stream.get_final_message()
+                    # Fail fast if the provider stalls before sending anything; once the
+                    # stream has started, the SDK's per-read timeout applies.
+                    async with asyncio.timeout(route.first_event_timeout_s) as deadline:
+                        async with client.messages.stream(**params) as stream:
+                            async for event in stream:
+                                if deadline.when() is not None:
+                                    deadline.reschedule(None)
+                                if event.type == "text":
+                                    if not emitted:
+                                        metrics.LLM_TTFT.labels(route.name, provider).observe(
+                                            time.perf_counter() - started)
+                                    emitted = True
+                                    yield TextDelta(event.text)
+                            message = await stream.get_final_message()
                 except Exception as exc:  # classified below
                     disposition = classify(exc)
+                    kind = "timeout" if isinstance(exc, TimeoutError) else disposition.value
+                    metrics.LLM_ERRORS.labels(provider, kind).inc()
                     if disposition is Disposition.FATAL:
                         raise
                     breaker.record_failure()
+                    metrics.LLM_BREAKER_OPEN.labels(provider).set(int(breaker.is_open))
                     last_error = exc
                     log.warning("model call failed", extra={
                         "provider": provider, "attempt": attempt, "error": repr(exc)})
@@ -155,9 +169,12 @@ class AIGateway:
                     breaker.release()
 
                 breaker.record_success()
+                metrics.LLM_BREAKER_OPEN.labels(provider).set(0)
+                metrics.LLM_DURATION.labels(route.name, provider).observe(
+                    time.perf_counter() - started)
                 if conversation_id:
                     self._remember(conversation_id, provider)
-                _log_usage(route, provider, message)
+                _record_usage(route, provider, message)
                 yield Completed(message=message, provider=provider)
                 return
         raise ModelUnavailable("no model provider available") from last_error
@@ -170,15 +187,29 @@ class AIGateway:
         raise GatewayError("stream ended without a final message")
 
 
-def _log_usage(route: Route, provider: str, message: Message) -> None:
+def _record_usage(route: Route, provider: str, message: Message) -> None:
     usage = message.usage
+    tokens = {
+        "input": usage.input_tokens,
+        "output": usage.output_tokens,
+        "cache_read": usage.cache_read_input_tokens or 0,
+        "cache_write": usage.cache_creation_input_tokens or 0,
+    }
+    for kind, count in tokens.items():
+        metrics.LLM_TOKENS.labels(route.name, provider, message.model, kind).inc(count)
+    cost = prices_for(message.model).cost(
+        input_tokens=tokens["input"], output_tokens=tokens["output"],
+        cache_read_tokens=tokens["cache_read"], cache_write_tokens=tokens["cache_write"])
+    metrics.LLM_COST.labels(route.name, provider, message.model).inc(cost)
+    prompt_tokens = tokens["input"] + tokens["cache_read"] + tokens["cache_write"]
+    if provider != "ollama" and prompt_tokens < route.model.min_cacheable_tokens:
+        metrics.LLM_BELOW_CACHE_MIN.labels(route.name).inc()
     log.info("model usage", extra={
         "route": route.name,
         "provider": provider,
         "model": message.model,
         "stop_reason": message.stop_reason,
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "cache_read_tokens": usage.cache_read_input_tokens,
-        "cache_write_tokens": usage.cache_creation_input_tokens,
+        "anthropic_request_id": getattr(message, "_request_id", None),
+        **{f"{kind}_tokens": count for kind, count in tokens.items()},
+        "cost_usd": round(cost, 6),
     })

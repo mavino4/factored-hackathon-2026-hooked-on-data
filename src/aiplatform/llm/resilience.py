@@ -14,7 +14,7 @@ class Disposition(Enum):
 
 
 def classify(exc: BaseException) -> Disposition:
-    if isinstance(exc, anthropic.APIConnectionError):  # includes APITimeoutError
+    if isinstance(exc, anthropic.APIConnectionError | TimeoutError):  # incl. APITimeoutError
         return Disposition.RETRY
     if isinstance(exc, anthropic.APIStatusError):
         status = exc.status_code
@@ -55,6 +55,10 @@ class CircuitBreaker:
         self._failures = 0
         self._opened_at: float | None = None
         self._probing = False
+
+    @property
+    def is_open(self) -> bool:
+        return self._opened_at is not None
 
     def available(self) -> bool:
         """Could a request go through now? Does not claim the half-open probe."""

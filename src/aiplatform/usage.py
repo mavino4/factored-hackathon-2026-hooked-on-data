@@ -39,6 +39,10 @@ class UsageStore(Protocol):
     async def record(self, event: UsageEvent) -> None: ...
     async def tokens_used_today(self, user_id: str) -> int: ...
 
+    async def daily_summary(self, days: int) -> list[dict] | None:
+        """Per day/route/provider/model totals, or None if this store keeps no history."""
+        ...
+
 
 def utc_day_start(now: float) -> float:
     return now - now % 86_400
@@ -64,6 +68,9 @@ class InMemoryUsageStore:
     async def tokens_used_today(self, user_id: str) -> int:
         self._roll()
         return self._totals.get(user_id, 0)
+
+    async def daily_summary(self, days: int) -> list[dict] | None:
+        return None  # only today's per-user totals are kept in memory
 
 
 class TokenQuota:

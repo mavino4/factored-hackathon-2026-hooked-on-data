@@ -8,17 +8,22 @@ spec:
       app.kubernetes.io/name: aiplatform
   policyTypes: [Ingress, Egress]
   ingress:
-    # Only the ingress controller and the monitoring stack may reach the API.
+    # Only the ingress controller may reach the API port...
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+    # ...and only the monitoring stack may scrape metrics (separate internal port).
+    - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: monitoring
       ports:
         - protocol: TCP
-          port: 8000
+          port: 9090
   egress:
     # DNS
     - to:

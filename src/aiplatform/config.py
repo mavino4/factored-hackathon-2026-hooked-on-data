@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     oidc_issuer: str | None = None  # e.g. https://your-tenant.eu.auth0.com/
     oidc_audience: str | None = None  # the API identifier the tokens are issued for
     oidc_jwks_url: str | None = None  # optional; discovered from the issuer when unset
+    # Public client ID of the web UI's OIDC application (browser login with PKCE).
+    oidc_client_id: str | None = None
+
+    # User IDs (token `sub`, or X-User-Id in dev mode) allowed to read /v1/admin/*.
+    admin_users: list[str] = []
+
+    # Prometheus metrics on a separate internal port (never through the public API). 0 = off.
+    metrics_port: int = 9090
 
     # e.g. postgresql+asyncpg://user:pass@host:5432/aiplatform. Unset = in-memory storage.
     database_url: str | None = None

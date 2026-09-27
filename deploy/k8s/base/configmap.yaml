@@ -11,3 +11,4 @@ data:
   AIP_OIDC_CLIENT_ID: replace-with-spa-client-id
   AIP_PROVIDERS: '["anthropic"]'
   AIP_ADMIN_USERS: '[]'
+  AIP_METRICS_PORT: "9090"
