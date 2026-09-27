@@ -94,3 +94,29 @@ def test_agent_bad_request_maps_to_422():
         cid = new_conversation(http, kind="agent")
         resp = post(http, f"/v1/conversations/{cid}/agent-runs", json={"text": "x"})
         assert resp.status_code == 422
+
+
+def test_two_replicas_share_conversations_through_the_database(tmp_path):
+    import asyncio
+
+    from aiplatform.storage.sql import create_engine
+    from aiplatform.storage.tables import metadata
+
+    url = f"sqlite+aiosqlite:///{tmp_path}/shared.db"
+
+    async def setup():
+        engine = create_engine(url)
+        async with engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
+        await engine.dispose()
+
+    asyncio.run(setup())
+    fake = FakeClient(text_reply("Stored answer"))
+    with client_for(fake, database_url=url) as replica_a, \
+            client_for(FakeClient(), database_url=url) as replica_b:
+        cid = new_conversation(replica_a)
+        post(replica_a, f"/v1/conversations/{cid}/messages", json={"text": "remember me"})
+        seen_by_b = replica_b.get(f"/v1/conversations/{cid}", headers={"X-User-Id": "u1"}).json()
+        assert [m["role"] for m in seen_by_b["messages"]] == ["user", "assistant"]
+        listed = replica_b.get("/v1/conversations", headers={"X-User-Id": "u1"}).json()
+        assert listed["conversations"][0]["title"] == "remember me"

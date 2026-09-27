@@ -1,4 +1,4 @@
-"""Per-user limits, in process. Good for a single replica; move to shared storage when scaling out."""
+"""Per-user request rate limit, in process. With N replicas the effective limit is N x the setting."""
 
 import time
 
@@ -34,27 +34,3 @@ class RateLimiter:
 
     def __len__(self) -> int:
         return len(self._buckets)
-
-
-class DailyTokenQuota:
-    def __init__(self, tokens_per_day: int, clock=time.time):
-        self.limit = tokens_per_day
-        self._clock = clock
-        self._day = self._today()
-        self._used: dict[str, int] = {}
-
-    def _today(self) -> int:
-        return int(self._clock() // 86_400)
-
-    def _roll(self) -> None:
-        if (today := self._today()) != self._day:  # new UTC day: forget yesterday
-            self._day = today
-            self._used = {}
-
-    def exceeded(self, user_id: str) -> bool:
-        self._roll()
-        return self._used.get(user_id, 0) >= self.limit
-
-    def charge(self, user_id: str, tokens: int) -> None:
-        self._roll()
-        self._used[user_id] = self._used.get(user_id, 0) + tokens

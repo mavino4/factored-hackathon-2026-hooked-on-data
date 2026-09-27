@@ -23,11 +23,16 @@ def test_rate_limiter_prunes_idle_buckets():
     assert len(limiter) == 1
 
 
-def test_daily_quota_resets_on_new_day():
-    from aiplatform.ratelimit import DailyTokenQuota
+async def test_usage_store_and_quota_reset_on_new_utc_day():
+    from aiplatform.usage import InMemoryUsageStore, TokenQuota, UsageEvent
+    from tests.fakes import make_message
+
     now = [0.0]
-    quota = DailyTokenQuota(100, clock=lambda: now[0])
-    quota.charge("u", 100)
-    assert quota.exceeded("u")
+    store = InMemoryUsageStore(clock=lambda: now[0])
+    quota = TokenQuota(store, 15)
+    event = UsageEvent.from_message(make_message(), user_id="u", conversation_id=None,
+                                    route="chat", provider="anthropic")
+    await store.record(event)  # 10 input + 5 output
+    assert await quota.exceeded("u")
     now[0] = 86_400
-    assert not quota.exceeded("u") and quota._used == {}
+    assert not await quota.exceeded("u") and store._totals == {}

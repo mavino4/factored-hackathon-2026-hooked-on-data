@@ -9,10 +9,10 @@ from aiplatform.agent.tools import Tool
 from aiplatform.chat.inflight import InFlight
 from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT
 from aiplatform.chat.repository import Conversation, ConversationRepository
-from aiplatform.chat.service import assistant_turn, check_history_size, usage_tokens
+from aiplatform.chat.service import assistant_turn, check_history_size
 from aiplatform.llm.gateway import AIGateway
 from aiplatform.llm.models import ROUTES
-from aiplatform.ratelimit import DailyTokenQuota
+from aiplatform.usage import UsageEvent, UsageStore
 
 log = logging.getLogger(__name__)
 
@@ -34,32 +34,35 @@ class AgentResult:
 
 class AgentRunner:
     def __init__(self, gateway: AIGateway, repo: ConversationRepository,
-                 quota: DailyTokenQuota, inflight: InFlight, tools: list[Tool], *,
+                 usage: UsageStore, inflight: InFlight, tools: list[Tool], *,
                  max_iterations: int = 8):
         self._gateway = gateway
         self._repo = repo
-        self._quota = quota
+        self._usage = usage
         self._inflight = inflight
         self._tools = {t.name: t for t in tools}
         self._definitions = [t.definition() for t in tools]  # fixed per route for caching
         self._max_iterations = max_iterations
 
     async def run(self, user_id: str, conversation_id: str, text: str) -> AgentResult:
-        conv = self._repo.get(conversation_id, user_id)
+        conv = await self._repo.get(conversation_id, user_id)
         with self._inflight.hold(conv.id):
             check_history_size(conv.messages)
-            self._repo.append(conv.id, {"role": "user", "content": text})
+            await self._repo.append(conv, {"role": "user", "content": text})
             return await self._loop(user_id, conv)
 
     async def _loop(self, user_id: str, conv: Conversation) -> AgentResult:
+        route = ROUTES["agent"]
         tool_calls: list[str] = []
         for _ in range(self._max_iterations):
             check_history_size(conv.messages)
             completed = await self._gateway.complete(
-                ROUTES["agent"], system=AGENT_SYSTEM_PROMPT, messages=conv.messages,
+                route, system=AGENT_SYSTEM_PROMPT, messages=conv.messages,
                 tools=self._definitions, conversation_id=conv.id)
             message = completed.message
-            self._quota.charge(user_id, usage_tokens(message))
+            await self._usage.record(UsageEvent.from_message(
+                message, user_id=user_id, conversation_id=conv.id,
+                route=route.name, provider=completed.provider))
             final_text = "".join(b.text for b in message.content if b.type == "text")
 
             if message.stop_reason == "refusal":
@@ -69,7 +72,7 @@ class AgentRunner:
                 # A truncated tool call must not run; don't store the half-finished turn.
                 return AgentResult("truncated", final_text, tool_calls)
 
-            self._repo.append(conv.id, assistant_turn(message))
+            await self._repo.append(conv, assistant_turn(message))
             if message.stop_reason == "pause_turn":
                 continue
             if not tool_uses:
@@ -78,7 +81,7 @@ class AgentRunner:
             # Run all requested tools concurrently; return every result in ONE user message.
             results = await asyncio.gather(*(self._execute(b) for b in tool_uses))
             tool_calls.extend(b.name for b in tool_uses)
-            self._repo.append(conv.id, {"role": "user", "content": list(results)})
+            await self._repo.append(conv, {"role": "user", "content": list(results)})
 
         return AgentResult("max_iterations", "", tool_calls)
 

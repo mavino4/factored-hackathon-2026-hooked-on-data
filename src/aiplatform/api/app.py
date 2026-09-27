@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 import anthropic
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -20,7 +20,9 @@ from aiplatform.config import Settings, get_settings
 from aiplatform.llm.gateway import AIGateway, Completed, GatewayError, TextDelta
 from aiplatform.llm.providers import build_clients, close_clients
 from aiplatform.logging import configure_logging
-from aiplatform.ratelimit import DailyTokenQuota, RateLimiter
+from aiplatform.ratelimit import RateLimiter
+from aiplatform.storage.sql import SqlConversationRepository, SqlUsageStore, create_engine
+from aiplatform.usage import InMemoryUsageStore, TokenQuota
 
 log = logging.getLogger(__name__)
 
@@ -45,19 +47,26 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         if gw is None:
             clients = build_clients(settings)
             gw = AIGateway(clients, settings)
-        repo = InMemoryConversationRepository()
-        quota = DailyTokenQuota(settings.user_tokens_per_day)
+        engine = None
+        if settings.database_url:
+            engine = create_engine(settings.database_url)
+            repo, usage = SqlConversationRepository(engine), SqlUsageStore(engine)
+        else:
+            log.warning("AIP_DATABASE_URL not set: using in-memory storage (data is lost on restart)")
+            repo, usage = InMemoryConversationRepository(), InMemoryUsageStore()
         inflight = InFlight()
         app.state.repo = repo
         app.state.inflight = inflight
-        app.state.quota = quota
+        app.state.quota = TokenQuota(usage, settings.user_tokens_per_day)
         app.state.limiter = RateLimiter(settings.user_requests_per_minute)
-        app.state.chat = ChatService(gw, repo, quota, inflight)
-        app.state.agent = AgentRunner(gw, repo, quota, inflight,
-                                        tools if tools is not None else DEFAULT_TOOLS)
+        app.state.chat = ChatService(gw, repo, usage, inflight)
+        app.state.agent = AgentRunner(gw, repo, usage, inflight,
+                                      tools if tools is not None else DEFAULT_TOOLS)
         yield
         if clients:
             await close_clients(clients)
+        if engine is not None:
+            await engine.dispose()
 
     app = FastAPI(title="AI Platform", version="0.1.0", lifespan=lifespan)
 
@@ -66,19 +75,22 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         # before exposing this service outside a trusted network.
         return x_user_id
 
-    def admit(request: Request, user_id: Annotated[str, Depends(current_user)]) -> str:
+    async def admit(request: Request, user_id: Annotated[str, Depends(current_user)]) -> str:
         state = request.app.state
         if not state.limiter.allow(user_id):
             raise HTTPException(429, "too many requests", headers={"Retry-After": "5"})
-        if state.quota.exceeded(user_id):
+        if await state.quota.exceeded(user_id):
             raise HTTPException(429, "daily token quota exceeded")
         return user_id
 
-    def get_conversation(request: Request, conversation_id: str, user_id: str, kind: str):
+    async def get_conversation(request: Request, conversation_id: str, user_id: str,
+                               kind: str | None = None):
         try:
-            conv = request.app.state.repo.get(conversation_id, user_id)
+            conv = await request.app.state.repo.get(conversation_id, user_id)
         except ConversationNotFound:
             raise HTTPException(404, "conversation not found") from None
+        if kind is None:
+            return conv
         if conv.kind != kind:
             raise HTTPException(409, f"this is a {conv.kind} conversation")
         if request.app.state.inflight.is_busy(conv.id):
@@ -92,28 +104,32 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
     @app.post("/v1/conversations", status_code=201)
     async def create_conversation(body: NewConversation, request: Request,
                                   user_id: Annotated[str, Depends(current_user)]) -> dict:
-        conv = request.app.state.repo.create(user_id, body.kind)
-        return {"id": conv.id, "kind": conv.kind, "created_at": conv.created_at.isoformat()}
+        conv = await request.app.state.repo.create(user_id, body.kind)
+        return _summary(conv)
+
+    @app.get("/v1/conversations")
+    async def list_conversations(request: Request,
+                                 user_id: Annotated[str, Depends(current_user)],
+                                 limit: int = Query(50, ge=1, le=200)) -> dict:
+        convs = await request.app.state.repo.list(user_id, limit)
+        return {"conversations": [_summary(c) for c in convs]}
 
     @app.get("/v1/conversations/{conversation_id}")
     async def read_conversation(conversation_id: str, request: Request,
                                 user_id: Annotated[str, Depends(current_user)]) -> dict:
-        try:
-            conv = request.app.state.repo.get(conversation_id, user_id)
-        except ConversationNotFound:
-            raise HTTPException(404, "conversation not found") from None
-        return {"id": conv.id, "kind": conv.kind, "messages": conv.messages}
+        conv = await get_conversation(request, conversation_id, user_id)
+        return {**_summary(conv), "messages": conv.messages}
 
     @app.post("/v1/conversations/{conversation_id}/messages")
     async def send_message(conversation_id: str, body: UserMessage, request: Request,
                            user_id: Annotated[str, Depends(admit)]) -> StreamingResponse:
-        conv = get_conversation(request, conversation_id, user_id, "chat")
+        conv = await get_conversation(request, conversation_id, user_id, "chat")
         return _stream(request.app.state.chat.send(user_id, conv.id, body.text))
 
     @app.post("/v1/conversations/{conversation_id}/regenerate")
     async def regenerate(conversation_id: str, request: Request,
                          user_id: Annotated[str, Depends(admit)]) -> StreamingResponse:
-        conv = get_conversation(request, conversation_id, user_id, "chat")
+        conv = await get_conversation(request, conversation_id, user_id, "chat")
         if not conv.messages or conv.messages[-1]["role"] != "user":
             raise HTTPException(409, "the last message already has a reply")
         return _stream(request.app.state.chat.regenerate(user_id, conv.id))
@@ -121,7 +137,7 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
     @app.post("/v1/conversations/{conversation_id}/agent-runs")
     async def run_agent(conversation_id: str, body: UserMessage, request: Request,
                         user_id: Annotated[str, Depends(admit)]) -> dict:
-        conv = get_conversation(request, conversation_id, user_id, "agent")
+        conv = await get_conversation(request, conversation_id, user_id, "agent")
         try:
             result = await request.app.state.agent.run(user_id, conv.id, body.text)
         except ConversationBusy:
@@ -137,6 +153,11 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         return {"outcome": result.outcome, "text": result.text, "tool_calls": result.tool_calls}
 
     return app
+
+
+def _summary(conv) -> dict:
+    return {"id": conv.id, "kind": conv.kind, "title": conv.title,
+            "created_at": conv.created_at.isoformat(), "updated_at": conv.updated_at.isoformat()}
 
 
 def _stream(events: AsyncIterator[TextDelta | Completed]) -> StreamingResponse:

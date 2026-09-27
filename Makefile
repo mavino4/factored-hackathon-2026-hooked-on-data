@@ -1,4 +1,4 @@
-.PHONY: check lint test run docker-build
+.PHONY: check lint test test-postgres run migrate docker-build
 
 check: lint test
 
@@ -7,6 +7,12 @@ lint:
 
 test:
 	uv run pytest -q
+
+test-postgres:  # needs AIP_TEST_DATABASE_URL, e.g. from `docker compose up db`
+	uv run pytest -q -m postgres
+
+migrate:
+	uv run alembic upgrade head
 
 run:
 	uv run uvicorn aiplatform.api.app:app --reload
