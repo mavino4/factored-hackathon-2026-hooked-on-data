@@ -19,7 +19,8 @@ src/aiplatform/
   usage.py           token usage events and the daily token quota
   auth.py            OIDC access-token (JWT) verification
   agent/             tool registry and the agent tool loop
-  api/app.py         HTTP API (SSE streaming)
+  api/app.py         HTTP API (SSE streaming) + serves the web UI
+  web/               web chat UI (plain HTML/CSS/JS, no build step)
 migrations/          Alembic migrations (must match storage/tables.py)
 tests/               run with a fake provider, no network
 ```
@@ -47,14 +48,33 @@ End-to-end smoke test against a real provider (chat streaming, history, agent to
 AIP_PROVIDERS='["ollama"]' uv run python scripts/smoke.py
 ```
 
+### Web UI
+
+Open http://localhost:8000 (from `make run` or `docker compose up`).
+- Chat with streamed replies, a conversation list, and history that survives reloads.
+- Agent tasks show each tool call. Actions that change something show an **approval card**
+  (Approve or Reject) and run only after approval.
+- Sign-in follows `AIP_AUTH_MODE`: a username field in `dev` mode, or the provider's login page
+  in `oidc` mode (authorization code + PKCE).
+
+Browser end-to-end test (headless Chromium; covers both login modes, chat, reload, agent approval):
+
+```bash
+uv run --with playwright python -m playwright install chromium   # once
+AIP_PROVIDERS='["ollama"]' uv run --with playwright python scripts/e2e_ui.py
+```
+
 ### Authentication
 
 - `AIP_AUTH_MODE=dev` (local only): the API trusts an `X-User-Id` header. Refused when `AIP_ENV=production`.
 - `AIP_AUTH_MODE=oidc` (default): every `/v1/*` call needs `Authorization: Bearer <JWT>` from the
   configured issuer. Any standard OIDC provider works (Auth0, Keycloak, Cognito, Entra ID…):
   set `AIP_OIDC_ISSUER` and `AIP_OIDC_AUDIENCE`. `user_id` is the token's `sub`.
+  For the web UI, also create a Single Page Application in the provider with callback URL
+  `https://<your host>/` and set `AIP_OIDC_CLIENT_ID`.
 
-Try real OIDC locally with the bundled dev issuer (not for production):
+Try real OIDC locally with the bundled dev issuer (not for production). It also serves a login
+page for the web UI: start the API with `AIP_OIDC_CLIENT_ID=web-ui` and open http://localhost:8000.
 
 ```bash
 uv run python scripts/dev_oidc.py serve &                 # http://127.0.0.1:9000/

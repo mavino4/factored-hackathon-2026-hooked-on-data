@@ -5,15 +5,18 @@ import json
 import logging
 import re
 import time
+import urllib.parse
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Literal
 
 import anthropic
 import sqlalchemy as sa
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import start_http_server
 from pydantic import BaseModel, Field
 
@@ -106,6 +109,7 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             await engine.dispose()
 
     app = FastAPI(title="AI Platform", version="0.1.0", lifespan=lifespan)
+    security_headers = _security_headers(settings)
 
     @app.middleware("http")
     async def observe(request: Request, call_next):
@@ -118,6 +122,7 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             response = await call_next(request)
             status = response.status_code
             response.headers["X-Request-ID"] = rid
+            response.headers.update(security_headers)
             return response
         finally:
             route = request.scope.get("route")
@@ -180,6 +185,13 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
     async def healthz() -> dict:
         """Liveness: the process is up. No dependency checks."""
         return {"status": "ok"}
+
+    @app.get("/config.json")
+    async def ui_config() -> dict:
+        """Public settings the web UI needs to sign users in (nothing secret)."""
+        return {"auth_mode": settings.auth_mode, "oidc_issuer": settings.oidc_issuer,
+                "oidc_client_id": settings.oidc_client_id,
+                "oidc_audience": settings.oidc_audience}
 
     @app.get("/readyz")
     async def readyz(request: Request):
@@ -266,10 +278,29 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         return _stream(request.app.state.agent.decide(
             user_id, conv.id, action_id, approve=body.decision == "approve"))
 
+    # The web UI: static files at "/". Mounted last so API routes take precedence.
+    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     return app
 
 
 _REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+
+def _security_headers(settings: Settings) -> dict[str, str]:
+    # The UI talks to this origin and, for OIDC login, to the issuer's token endpoint.
+    connect = ["'self'"]
+    if settings.auth_mode == "oidc" and settings.oidc_issuer:
+        parsed = urllib.parse.urlparse(settings.oidc_issuer)
+        connect.append(f"{parsed.scheme}://{parsed.netloc}")
+    return {
+        "Content-Security-Policy": (
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            f"connect-src {' '.join(connect)}; frame-ancestors 'none'; base-uri 'none'; "
+            "form-action 'self'"),
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+    }
 
 
 def _summary(conv) -> dict:

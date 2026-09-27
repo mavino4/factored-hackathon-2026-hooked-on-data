@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Assistant</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <!-- Login -->
+  <main id="login" class="login" hidden>
+    <div class="login-card">
+      <h1>AI Assistant</h1>
+      <p class="muted" id="login-hint">Sign in to continue.</p>
+      <form id="dev-login" hidden>
+        <label for="dev-user">Username (dev mode)</label>
+        <input id="dev-user" required pattern="[A-Za-z0-9._\-]{1,40}" autocomplete="username">
+        <button type="submit" class="primary">Continue</button>
+      </form>
+      <button id="oidc-login" class="primary" hidden>Sign in</button>
+      <p class="error" id="login-error" hidden></p>
+    </div>
+  </main>
+
+  <!-- App -->
+  <div id="app" class="app" hidden>
+    <aside class="sidebar">
+      <div class="sidebar-actions">
+        <button id="new-chat" class="primary">+ New chat</button>
+        <button id="new-agent">+ New agent task</button>
+      </div>
+      <nav>
+        <ul id="conversation-list" class="conversation-list"></ul>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="user-name" class="muted"></span>
+        <button id="logout" class="link">Sign out</button>
+      </div>
+    </aside>
+
+    <section class="chat">
+      <header class="chat-header">
+        <button id="toggle-sidebar" class="icon" aria-label="Conversations">☰</button>
+        <h2 id="chat-title">Start a conversation</h2>
+        <span id="chat-kind" class="badge" hidden></span>
+      </header>
+      <div id="messages" class="messages" aria-live="polite">
+        <div class="empty muted" id="empty-state">
+          Choose <strong>New chat</strong> to talk with the assistant, or <strong>New agent task</strong>
+          to let it use tools. Actions that change something always ask for your approval first.
+        </div>
+      </div>
+      <form id="composer" class="composer">
+        <textarea id="input" rows="1" placeholder="Send a message…" maxlength="20000" disabled></textarea>
+        <button id="send" class="primary" type="submit" disabled>Send</button>
+      </form>
+    </section>
+  </div>
+</body>
+</html>
