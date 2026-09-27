@@ -9,9 +9,10 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from aiplatform.agent.actions import ActionNotPending, PendingAction
 from aiplatform.chat.inflight import ConversationBusy
 from aiplatform.chat.repository import Conversation, ConversationNotFound, Kind, title_from
-from aiplatform.storage.tables import conversations, messages, usage_events
+from aiplatform.storage.tables import conversations, messages, pending_actions, usage_events
 from aiplatform.usage import UsageEvent, utc_day_start
 
 
@@ -112,3 +113,59 @@ class SqlUsageStore:
             value = await db.scalar(sa.select(sa.func.coalesce(sa.func.sum(total), 0)).where(
                 usage_events.c.user_id == user_id, usage_events.c.created_at >= since))
         return int(value)
+
+
+def _row_to_action(row) -> PendingAction:
+    return PendingAction(
+        id=str(row.id), conversation_id=str(row.conversation_id), user_id=row.user_id,
+        tool_use_id=row.tool_use_id, tool_name=row.tool_name, input=row.input,
+        status=row.status, created_at=_as_utc(row.created_at),
+        decided_at=_as_utc(row.decided_at) if row.decided_at else None)
+
+
+class SqlActionStore:
+    def __init__(self, engine: AsyncEngine):
+        self._engine = engine
+
+    async def create(self, *, conversation_id: str, user_id: str, tool_use_id: str,
+                     tool_name: str, input: dict) -> PendingAction:
+        action = PendingAction(id=str(uuid.uuid4()), conversation_id=conversation_id,
+                               user_id=user_id, tool_use_id=tool_use_id, tool_name=tool_name,
+                               input=input, status="pending", created_at=datetime.now(UTC))
+        async with self._engine.begin() as db:
+            await db.execute(pending_actions.insert().values(
+                id=action.id, conversation_id=conversation_id, user_id=user_id,
+                tool_use_id=tool_use_id, tool_name=tool_name, input=input,
+                status="pending", created_at=action.created_at))
+        return action
+
+    async def list_pending(self, conversation_id: str, user_id: str) -> list[PendingAction]:
+        async with self._engine.connect() as db:
+            result = await db.execute(
+                sa.select(pending_actions).where(
+                    pending_actions.c.conversation_id == conversation_id,
+                    pending_actions.c.user_id == user_id,
+                    pending_actions.c.status == "pending")
+                .order_by(pending_actions.c.created_at))
+            return [_row_to_action(r) for r in result]
+
+    async def decide(self, action_id: str, *, user_id: str, conversation_id: str,
+                     approve: bool) -> PendingAction:
+        try:
+            uuid.UUID(action_id)
+        except ValueError:
+            raise ActionNotPending(action_id) from None
+        now = datetime.now(UTC)
+        async with self._engine.begin() as db:
+            result = await db.execute(
+                pending_actions.update()
+                .where(pending_actions.c.id == action_id,
+                       pending_actions.c.user_id == user_id,
+                       pending_actions.c.conversation_id == conversation_id,
+                       pending_actions.c.status == "pending")
+                .values(status="approved" if approve else "rejected", decided_at=now))
+            if result.rowcount != 1:
+                raise ActionNotPending(action_id)
+            row = (await db.execute(
+                sa.select(pending_actions).where(pending_actions.c.id == action_id))).one()
+        return _row_to_action(row)

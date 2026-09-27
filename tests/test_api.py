@@ -90,11 +90,45 @@ def test_regenerate_after_interrupted_stream_does_not_duplicate_user_message():
         assert post(http, f"/v1/conversations/{cid}/regenerate").status_code == 409
 
 
-def test_agent_bad_request_maps_to_422():
+def test_agent_bad_request_becomes_error_event():
     with client_for(FakeClient(status_error(400))) as http:
         cid = new_conversation(http, kind="agent")
         resp = post(http, f"/v1/conversations/{cid}/agent-runs", json={"text": "x"})
-        assert resp.status_code == 422
+        assert "event: error" in resp.text and "invalid_request" in resp.text
+
+
+def test_agent_approval_flow_over_http():
+    from tests.fakes import make_message
+    ticket = {"title": "t", "details": "d"}
+    fake = FakeClient(
+        ([], make_message({"type": "tool_use", "id": "tu_1", "name": "create_support_ticket",
+                           "input": ticket}, stop_reason="tool_use")),
+        text_reply("Please approve."),
+        text_reply("Ticket opened."))
+    with client_for(fake) as http:
+        cid = new_conversation(http, kind="agent")
+        run = post(http, f"/v1/conversations/{cid}/agent-runs", json={"text": "open a ticket"})
+        assert "event: approval_required" in run.text
+        assert '"outcome": "approval_required"' in run.text
+        conv = http.get(f"/v1/conversations/{cid}", headers={"X-User-Id": "u1"}).json()
+        [action] = conv["pending_actions"]
+        assert action["tool_name"] == "create_support_ticket" and action["input"] == ticket
+
+        # Other users can't decide it; unknown ids are 404.
+        other = http.post(f"/v1/conversations/{cid}/actions/{action['id']}",
+                          json={"decision": "approve"}, headers={"X-User-Id": "mallory"})
+        assert other.status_code == 404
+        assert post(http, f"/v1/conversations/{cid}/actions/nope",
+                    json={"decision": "approve"}).status_code == 404
+
+        done = post(http, f"/v1/conversations/{cid}/actions/{action['id']}",
+                    json={"decision": "approve"})
+        assert "event: tool_result" in done.text and "Ticket created: t" in done.text
+        assert "Ticket opened." in done.text
+        conv = http.get(f"/v1/conversations/{cid}", headers={"X-User-Id": "u1"}).json()
+        assert conv["pending_actions"] == []
+        assert post(http, f"/v1/conversations/{cid}/actions/{action['id']}",
+                    json={"decision": "approve"}).status_code == 404
 
 
 def test_two_replicas_share_conversations_through_the_database(tmp_path):

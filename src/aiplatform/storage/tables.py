@@ -46,3 +46,20 @@ usage_events = sa.Table(
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     sa.Index("ix_usage_events_user_created", "user_id", "created_at"),
 )
+
+# Irreversible tool calls waiting for the user's decision. `status` moves from
+# pending to approved/rejected exactly once (conditional UPDATE), so a tool can't run twice.
+pending_actions = sa.Table(
+    "pending_actions", metadata,
+    sa.Column("id", sa.Uuid(as_uuid=False), primary_key=True),
+    sa.Column("conversation_id", sa.Uuid(as_uuid=False),
+              sa.ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+    sa.Column("user_id", sa.Text, nullable=False),
+    sa.Column("tool_use_id", sa.Text, nullable=False),
+    sa.Column("tool_name", sa.Text, nullable=False),
+    sa.Column("input", JSONType, nullable=False),
+    sa.Column("status", sa.Text, nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Index("ix_pending_actions_conversation", "conversation_id", "status"),
+)

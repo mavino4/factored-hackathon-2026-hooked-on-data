@@ -106,15 +106,43 @@ def main() -> int:
 
         aid = http.post("/v1/conversations", json={"kind": "agent"}, headers=USER).json()["id"]
         start = time.perf_counter()
-        resp = http.post(f"/v1/conversations/{aid}/agent-runs", headers=USER,
-                         json={"text": "What is the current UTC date and time? "
-                                       "Use the get_current_time tool."})
-        result = resp.json()
-        print(f"\n[agent] HTTP {resp.status_code} in {time.perf_counter() - start:.2f}s -> {result}")
-        if resp.status_code != 200 or result.get("outcome") != "done":
-            print("  FAIL: agent run did not finish"); failures += 1
-        elif "get_current_time" not in result.get("tool_calls", []):
+        events = parse_sse(http.post(
+            f"/v1/conversations/{aid}/agent-runs", headers=USER,
+            json={"text": "What is the current UTC date and time? "
+                          "Use the get_current_time tool."}).text)
+        done = next((d for n, d in events if n == "done"), {})
+        print(f"\n[agent] {time.perf_counter() - start:.2f}s events="
+              f"{[n for n, _ in events if n != 'delta']} -> {done}")
+        if done.get("outcome") != "done":
+            print(f"  FAIL: agent run did not finish: {events[-1:]}"); failures += 1
+        elif "get_current_time" not in done.get("tool_calls", []):
             print("  WARN: model answered without calling the tool (quality, not plumbing)")
+
+        # Approval flow: the irreversible tool must wait for the user's decision.
+        tid = http.post("/v1/conversations", json={"kind": "agent"}, headers=USER).json()["id"]
+        events = parse_sse(http.post(
+            f"/v1/conversations/{tid}/agent-runs", headers=USER,
+            json={"text": "Open a support ticket titled 'Printer broken' with details "
+                          "'Paper jam on floor 2'. Use the create_support_ticket tool."}).text)
+        approval = next((d for n, d in events if n == "approval_required"), None)
+        if approval is None:
+            print("\n[approval] WARN: model did not call create_support_ticket "
+                  "(quality, not plumbing)")
+        else:
+            print(f"\n[approval] pending: {approval['tool_name']} {approval['input']}")
+            decided = parse_sse(http.post(
+                f"/v1/conversations/{tid}/actions/{approval['action_id']}", headers=USER,
+                json={"decision": "approve"}).text)
+            result = next((d for n, d in decided if n == "tool_result"), {})
+            done = next((d for n, d in decided if n == "done"), {})
+            print(f"  approved -> tool_result={result.get('content')!r} done={done}")
+            if result.get("is_error") is not False or done.get("outcome") not in (
+                    "done", "approval_required"):
+                print(f"  FAIL: approval did not execute cleanly: {decided[-2:]}"); failures += 1
+            again = http.post(f"/v1/conversations/{tid}/actions/{approval['action_id']}",
+                              headers=USER, json={"decision": "approve"})
+            print(f"  approve twice -> HTTP {again.status_code} (expect 404)")
+            failures += again.status_code != 404
 
     print(f"\n{'PASS' if not failures else f'FAIL ({failures})'}")
     return 1 if failures else 0

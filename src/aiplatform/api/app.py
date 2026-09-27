@@ -11,7 +11,15 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from aiplatform.agent.loop import AgentRunner
+from aiplatform.agent.actions import ActionNotPending, InMemoryActionStore
+from aiplatform.agent.loop import (
+    AgentDone,
+    AgentRunner,
+    AgentText,
+    ApprovalRequired,
+    ToolCall,
+    ToolResult,
+)
 from aiplatform.agent.tools import DEFAULT_TOOLS, Tool
 from aiplatform.auth import AuthError, OIDCVerifier
 from aiplatform.chat.inflight import ConversationBusy, InFlight
@@ -22,7 +30,12 @@ from aiplatform.llm.gateway import AIGateway, Completed, GatewayError, TextDelta
 from aiplatform.llm.providers import build_clients, close_clients
 from aiplatform.logging import configure_logging
 from aiplatform.ratelimit import RateLimiter
-from aiplatform.storage.sql import SqlConversationRepository, SqlUsageStore, create_engine
+from aiplatform.storage.sql import (
+    SqlActionStore,
+    SqlConversationRepository,
+    SqlUsageStore,
+    create_engine,
+)
 from aiplatform.usage import InMemoryUsageStore, TokenQuota
 
 log = logging.getLogger(__name__)
@@ -34,6 +47,10 @@ class NewConversation(BaseModel):
 
 class UserMessage(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
+
+
+class Decision(BaseModel):
+    decision: Literal["approve", "reject"]
 
 
 def create_app(settings: Settings | None = None, gateway: AIGateway | None = None,
@@ -53,16 +70,19 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         if settings.database_url:
             engine = create_engine(settings.database_url)
             repo, usage = SqlConversationRepository(engine), SqlUsageStore(engine)
+            actions = SqlActionStore(engine)
         else:
             log.warning("AIP_DATABASE_URL not set: using in-memory storage (data is lost on restart)")
             repo, usage = InMemoryConversationRepository(), InMemoryUsageStore()
+            actions = InMemoryActionStore()
         inflight = InFlight()
         app.state.repo = repo
+        app.state.actions = actions
         app.state.inflight = inflight
         app.state.quota = TokenQuota(usage, settings.user_tokens_per_day)
         app.state.limiter = RateLimiter(settings.user_requests_per_minute)
         app.state.chat = ChatService(gw, repo, usage, inflight)
-        app.state.agent = AgentRunner(gw, repo, usage, inflight,
+        app.state.agent = AgentRunner(gw, repo, usage, inflight, actions,
                                       tools if tools is not None else DEFAULT_TOOLS)
         yield
         if clients:
@@ -139,7 +159,11 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
     async def read_conversation(conversation_id: str, request: Request,
                                 user_id: Annotated[str, Depends(current_user)]) -> dict:
         conv = await get_conversation(request, conversation_id, user_id)
-        return {**_summary(conv), "messages": conv.messages}
+        pending = []
+        if conv.kind == "agent":
+            pending = [{"id": a.id, "tool_name": a.tool_name, "input": a.input}
+                       for a in await request.app.state.actions.list_pending(conv.id, user_id)]
+        return {**_summary(conv), "messages": conv.messages, "pending_actions": pending}
 
     @app.post("/v1/conversations/{conversation_id}/messages")
     async def send_message(conversation_id: str, body: UserMessage, request: Request,
@@ -157,21 +181,20 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
 
     @app.post("/v1/conversations/{conversation_id}/agent-runs")
     async def run_agent(conversation_id: str, body: UserMessage, request: Request,
-                        user_id: Annotated[str, Depends(admit)]) -> dict:
+                        user_id: Annotated[str, Depends(admit)]) -> StreamingResponse:
         conv = await get_conversation(request, conversation_id, user_id, "agent")
-        try:
-            result = await request.app.state.agent.run(user_id, conv.id, body.text)
-        except ConversationBusy:
-            raise HTTPException(409, "a reply is already in progress") from None
-        except ConversationTooLong:
-            raise HTTPException(422, "conversation is too long; start a new one") from None
-        except anthropic.BadRequestError:
-            log.exception("agent run rejected by the model API")
-            raise HTTPException(422, "the request could not be processed") from None
-        except (GatewayError, anthropic.APIError):
-            log.exception("agent run failed")
-            raise HTTPException(503, "the AI service is busy, please retry") from None
-        return {"outcome": result.outcome, "text": result.text, "tool_calls": result.tool_calls}
+        return _stream(request.app.state.agent.run(user_id, conv.id, body.text))
+
+    @app.post("/v1/conversations/{conversation_id}/actions/{action_id}")
+    async def decide_action(conversation_id: str, action_id: str, body: Decision,
+                            request: Request,
+                            user_id: Annotated[str, Depends(admit)]) -> StreamingResponse:
+        conv = await get_conversation(request, conversation_id, user_id, "agent")
+        pending = await request.app.state.actions.list_pending(conv.id, user_id)
+        if not any(a.id == action_id for a in pending):
+            raise HTTPException(404, "no pending action with this id")
+        return _stream(request.app.state.agent.decide(
+            user_id, conv.id, action_id, approve=body.decision == "approve"))
 
     return app
 
@@ -181,7 +204,7 @@ def _summary(conv) -> dict:
             "created_at": conv.created_at.isoformat(), "updated_at": conv.updated_at.isoformat()}
 
 
-def _stream(events: AsyncIterator[TextDelta | Completed]) -> StreamingResponse:
+def _stream(events: AsyncIterator) -> StreamingResponse:
     return StreamingResponse(_sse(events), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -190,25 +213,47 @@ def _event(name: str, data: dict) -> str:
     return f"event: {name}\ndata: {json.dumps(data)}\n\n"
 
 
-async def _sse(events: AsyncIterator[TextDelta | Completed]) -> AsyncIterator[str]:
+REFUSAL = {"message": "The assistant can't help with that request."}
+
+
+def _encode(event) -> list[str]:
+    """Map chat/agent events to SSE frames."""
+    match event:
+        case TextDelta(text=text) | AgentText(text=text):
+            return [_event("delta", {"text": text})]
+        case Completed(message=message):
+            frames = [_event("refusal", REFUSAL)] if message.stop_reason == "refusal" else []
+            return frames + [_event("done", {
+                "stop_reason": message.stop_reason,
+                "usage": {"input_tokens": message.usage.input_tokens,
+                          "output_tokens": message.usage.output_tokens}})]
+        case ToolCall(id=id, name=name, input=args):
+            return [_event("tool_call", {"id": id, "name": name, "input": args})]
+        case ToolResult(id=id, name=name, is_error=is_error, content=content):
+            return [_event("tool_result", {"id": id, "name": name, "is_error": is_error,
+                                           "content": content[:2_000]})]
+        case ApprovalRequired(action_id=action_id, tool_name=tool_name, input=args):
+            return [_event("approval_required", {"action_id": action_id,
+                                                 "tool_name": tool_name, "input": args})]
+        case AgentDone(outcome=outcome, tool_calls=tool_calls):
+            frames = [_event("refusal", REFUSAL)] if outcome == "refused" else []
+            return frames + [_event("done", {"outcome": outcome, "tool_calls": tool_calls})]
+    raise TypeError(f"unknown event: {event!r}")
+
+
+async def _sse(events: AsyncIterator) -> AsyncIterator[str]:
     try:
         async for event in events:
-            if isinstance(event, TextDelta):
-                yield _event("delta", {"text": event.text})
-            else:
-                message = event.message
-                if message.stop_reason == "refusal":
-                    yield _event("refusal", {"message": "The assistant can't help with that request."})
-                yield _event("done", {
-                    "stop_reason": message.stop_reason,
-                    "usage": {"input_tokens": message.usage.input_tokens,
-                              "output_tokens": message.usage.output_tokens},
-                })
+            for frame in _encode(event):
+                yield frame
     except ConversationTooLong:
         yield _event("error", {"code": "conversation_too_long",
                                "message": "Start a new conversation."})
     except ConversationBusy:
         yield _event("error", {"code": "busy", "message": "A reply is already in progress."})
+    except ActionNotPending:
+        yield _event("error", {"code": "action_not_pending",
+                               "message": "This action was already decided."})
     except NothingToRegenerate:
         yield _event("error", {"code": "nothing_to_regenerate",
                                "message": "The last message already has a reply."})
