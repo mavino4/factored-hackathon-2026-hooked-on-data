@@ -123,6 +123,11 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             status = response.status_code
             response.headers["X-Request-ID"] = rid
             response.headers.update(security_headers)
+            path = request.url.path
+            if path.startswith("/v1/") or path in ("/", "/index.html", "/config.json"):
+                # Per-user data, and the page that displays it: never stored by the browser
+                # or a proxy (also keeps the back button from restoring a signed-out page).
+                response.headers["Cache-Control"] = "no-store"
             return response
         finally:
             route = request.scope.get("route")

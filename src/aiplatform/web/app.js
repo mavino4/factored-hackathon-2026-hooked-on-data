@@ -63,6 +63,9 @@ async function startOidcLogin() {
     redirect_uri: redirectUri(),
     scope: "openid profile",
     audience: state.config.oidc_audience,  // Auth0 needs this to issue an API access token
+    // Always ask for credentials: an existing provider session must never silently
+    // sign in the previous person on a shared computer.
+    prompt: "login",
     state: oauthState,
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -125,12 +128,46 @@ async function initAuth() {
   return null;
 }
 
-function logout() {
+// Sign out and discard everything from this user's session. The page is reloaded
+// (or sent to the provider's logout) so no data stays in memory or on screen.
+async function logout() {
+  const wasOidc = state.config.auth_mode === "oidc" && sessionStorage.getItem(TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(DEV_USER_KEY);
+  sessionStorage.removeItem(PKCE_KEY);
   state.auth = null;
   state.current = null;
-  showLogin();
+  state.conversations = [];
+  resetView();
+  if (wasOidc) {
+    try {
+      const meta = await discovery();
+      if (meta.end_session_endpoint) {
+        const params = new URLSearchParams({
+          client_id: state.config.oidc_client_id,
+          post_logout_redirect_uri: redirectUri(),
+        });
+        location.replace(`${meta.end_session_endpoint}?${params}`);
+        return;
+      }
+    } catch { /* provider unreachable: still sign out locally */ }
+  }
+  location.replace("/");
+}
+
+// Remove every trace of the previous conversation and user from the page.
+function resetView() {
+  $("conversation-list").replaceChildren();
+  $("chat-title").textContent = "Start a conversation";
+  $("chat-kind").hidden = true;
+  $("chat-kind").textContent = "";
+  $("user-name").textContent = "";
+  $("input").value = "";
+  messagesEl().replaceChildren(el("div", { class: "empty muted" },
+    "Choose New chat to talk with the assistant, or New agent task to let it use tools. "
+    + "Actions that change something always ask for your approval first."));
+  state.current = null;
+  setBusy(false);
 }
 
 function showLogin(errorMessage) {
@@ -161,7 +198,7 @@ async function api(path, { method = "GET", body } = {}) {
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   if (res.status === 401) {
-    logout();
+    await logout();
     throw new ApiError(401, "Your session expired. Please sign in again.");
   }
   if (!res.ok) {
@@ -441,6 +478,7 @@ function autoResize() {
 // Boot
 // ---------------------------------------------------------------------------
 async function showApp() {
+  resetView();  // never show anything left over from another user
   $("login").hidden = true;
   $("app").hidden = false;
   $("user-name").textContent = state.auth.user;
@@ -467,7 +505,7 @@ async function boot() {
     showApp().catch((err) => showLogin(err.message));
   });
   $("oidc-login").addEventListener("click", () => startOidcLogin().catch((err) => showLogin(err.message)));
-  $("logout").addEventListener("click", logout);
+  $("logout").addEventListener("click", () => { logout(); });
   $("new-chat").addEventListener("click", guard(() => createConversation("chat")));
   $("new-agent").addEventListener("click", guard(() => createConversation("agent")));
   $("composer").addEventListener("submit", guard(send));

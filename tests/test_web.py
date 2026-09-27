@@ -127,3 +127,24 @@ def test_pkce_rejects_wrong_verifier_and_foreign_redirects(issuer):
     assert http.get("/authorize", params={"redirect_uri": "https://evil.example/",
                                           "code_challenge": challenge,
                                           "code_challenge_method": "S256"}).status_code == 400
+
+
+def test_user_data_is_never_cached():
+    with app_client() as http:
+        headers = {"X-User-Id": "ana"}
+        assert http.get("/v1/conversations", headers=headers).headers["cache-control"] == "no-store"
+        cid = http.post("/v1/conversations", json={"kind": "chat"}, headers=headers).json()["id"]
+        assert http.get(f"/v1/conversations/{cid}", headers=headers).headers[
+            "cache-control"] == "no-store"
+        assert http.get("/config.json").headers["cache-control"] == "no-store"
+        assert http.get("/").headers["cache-control"] == "no-store"
+
+
+def test_dev_issuer_logout_redirects_only_to_localhost(issuer):
+    http, _ = issuer
+    meta = http.get("/.well-known/openid-configuration").json()
+    assert meta["end_session_endpoint"] == f"{ISSUER}logout"
+    ok = http.get("/logout", params={"post_logout_redirect_uri": REDIRECT}, follow_redirects=False)
+    assert ok.status_code == 303 and ok.headers["location"] == REDIRECT
+    assert http.get("/logout", params={"post_logout_redirect_uri": "https://evil.example/"},
+                    follow_redirects=False).status_code == 400

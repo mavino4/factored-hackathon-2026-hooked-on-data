@@ -100,6 +100,7 @@ def create_issuer_app(key: rsa.RSAPrivateKey, issuer: str) -> FastAPI:
         return {"issuer": issuer, "jwks_uri": f"{issuer}jwks.json",
                 "authorization_endpoint": f"{issuer}authorize",
                 "token_endpoint": f"{issuer}token",
+                "end_session_endpoint": f"{issuer}logout",
                 "response_types_supported": ["code"],
                 "code_challenge_methods_supported": ["S256"],
                 "id_token_signing_alg_values_supported": ["RS256"]}
@@ -129,6 +130,13 @@ def create_issuer_app(key: rsa.RSAPrivateKey, issuer: str) -> FastAPI:
         codes[code] = {**form, "expires": time.time() + 60}
         query = urllib.parse.urlencode({"code": code, "state": form.get("state", "")})
         return RedirectResponse(f"{form['redirect_uri']}?{query}", status_code=303)
+
+    @app.get("/logout")
+    def logout(post_logout_redirect_uri: str = "") -> RedirectResponse:
+        # The dev issuer keeps no login session; just send the browser back.
+        if not _local_redirect(post_logout_redirect_uri):
+            raise HTTPException(400, "post_logout_redirect_uri must be on localhost")
+        return RedirectResponse(post_logout_redirect_uri, status_code=303)
 
     @app.post("/token")
     async def token(request: Request) -> dict:

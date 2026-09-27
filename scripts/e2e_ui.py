@@ -52,6 +52,17 @@ def watch_console(page: Page, errors: list[str]) -> None:
     page.on("pageerror", lambda exc: errors.append(str(exc)))
 
 
+def assert_clean_session(page: Page, user: str, previous_text: str) -> None:
+    """A newly signed-in user must see nothing from the previous user's session."""
+    expect(page.locator("#user-name")).to_have_text(user, timeout=10_000)
+    page.wait_for_timeout(500)  # let the conversation list load
+    expect(page.locator("#conversation-list li")).to_have_count(0)
+    body = page.locator("body").inner_text()
+    assert previous_text not in body, f"previous user's data visible to {user}"
+    assert "Printer broken" not in body, f"previous user's agent task visible to {user}"
+    print(f"  switched user: {user} sees an empty, clean session")
+
+
 def chat_and_agent_flow(page: Page) -> None:
     # Chat with streaming.
     page.get_by_role("button", name="+ New chat").click()
@@ -103,6 +114,10 @@ def run_dev_mode(browser) -> list[str]:
         page.get_by_role("button", name="Continue").click()
         expect(page.locator("#user-name")).to_have_text("ana")
         chat_and_agent_flow(page)
+        page.get_by_role("button", name="Sign out").click()
+        page.locator("#dev-user").fill("carol")
+        page.get_by_role("button", name="Continue").click()
+        assert_clean_session(page, "carol", "Reply with exactly")
         page.close()
     return errors
 
@@ -128,7 +143,15 @@ def run_oidc_mode(browser) -> list[str]:
         chat_and_agent_flow(page)
         page.get_by_role("button", name="Sign out").click()
         expect(page.get_by_role("button", name="Sign in")).to_be_visible()
-        print("  signed out")
+        print("  signed out (provider logout, back to the app)")
+        # Signing in again must ask for credentials (prompt=login), then show a clean session.
+        page.get_by_role("button", name="Sign in").click()
+        page.wait_for_url(f"{ISSUER}authorize*")
+        assert "prompt=login" in page.url
+        page.locator("input[name=username]").fill("dave")
+        page.get_by_role("button", name="Sign in").click()
+        page.wait_for_url(f"{API}/")
+        assert_clean_session(page, "dave", "Reply with exactly")
         page.close()
     return errors
 
