@@ -78,8 +78,10 @@ AIP_TEST_DATABASE_URL=postgresql+asyncpg://aiplatform:aiplatform@localhost:5432/
   make test-postgres
 ```
 
-The app containers reach the host's Ollama at `host.docker.internal:11434`, so Ollama must listen
-on an address containers can reach, not only `127.0.0.1`.
+The app containers reach the host's Ollama at `host.docker.internal:11434`. If your Ollama
+listens only on `127.0.0.1`, install the small user-level proxy in
+[`deploy/ollama-docker-proxy/`](deploy/ollama-docker-proxy/README.md). It needs no sudo and
+doesn't expose Ollama on your LAN.
 
 Against your own Postgres: set `AIP_DATABASE_URL=postgresql+asyncpg://...`, then `make migrate && make run`.
 

@@ -1,0 +1,7 @@
+[Unit]
+Description=Forward Docker bridge connections to the local Ollama
+Requires=ollama-docker-proxy.socket
+After=ollama-docker-proxy.socket
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:11434

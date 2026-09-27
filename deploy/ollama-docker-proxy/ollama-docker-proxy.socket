@@ -1,0 +1,13 @@
+# Exposes the host's Ollama (127.0.0.1:11434) to Docker containers only, via the
+# docker0 bridge address. Nothing listens on your LAN interfaces.
+# Install: see deploy/ollama-docker-proxy/README.md
+[Unit]
+Description=Ollama proxy socket for Docker containers (172.17.0.1:11434)
+
+[Socket]
+ListenStream=172.17.0.1:11434
+# Bind even if docker0 isn't up yet at login.
+FreeBind=true
+
+[Install]
+WantedBy=sockets.target
