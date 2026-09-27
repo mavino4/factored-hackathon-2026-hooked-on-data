@@ -67,8 +67,19 @@ AIP_PROVIDERS='["ollama"]' make smoke
 Full stack (Postgres + 2 app replicas behind nginx, needs Docker):
 
 ```bash
-docker compose up --build     # API on http://localhost:8000
+docker compose up --build -d  # API on http://localhost:8000 (dev auth, Ollama provider)
+docker compose down           # stop (add -v to also delete the database volume)
 ```
+
+The stack also creates an `aiplatform_test` database for the Postgres storage tests:
+
+```bash
+AIP_TEST_DATABASE_URL=postgresql+asyncpg://aiplatform:aiplatform@localhost:5432/aiplatform_test \
+  make test-postgres
+```
+
+The app containers reach the host's Ollama at `host.docker.internal:11434`, so Ollama must listen
+on an address containers can reach, not only `127.0.0.1`.
 
 Against your own Postgres: set `AIP_DATABASE_URL=postgresql+asyncpg://...`, then `make migrate && make run`.
 
@@ -90,8 +101,7 @@ curl -s localhost:8000/v1/conversations/$AID/agent-runs -H 'X-User-Id: demo' \
 
 ```bash
 make check                    # lint + tests (in-memory and SQLite)
-AIP_TEST_DATABASE_URL=postgresql+asyncpg://aiplatform:aiplatform@localhost:5432/aiplatform_test \
-  make test-postgres          # same storage tests against real Postgres
+make test-postgres            # same storage tests against real Postgres (see above)
 ```
 
 ## Before production

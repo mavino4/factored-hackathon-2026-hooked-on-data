@@ -9,7 +9,10 @@ services:
       POSTGRES_PASSWORD: aiplatform
       POSTGRES_DB: aiplatform
     ports: ["5432:5432"]
-    volumes: [pgdata:/var/lib/postgresql/data]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Creates the separate aiplatform_test database used by `make test-postgres`.
+      - ./deploy/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U aiplatform"]
       interval: 2s
@@ -30,6 +33,11 @@ services:
         required: false
     environment:
       AIP_DATABASE_URL: postgresql+asyncpg://aiplatform:aiplatform@db:5432/aiplatform
+      # Local defaults; override in .env or the shell.
+      AIP_AUTH_MODE: ${AIP_AUTH_MODE:-dev}
+      AIP_PROVIDERS: ${AIP_PROVIDERS:-["ollama"]}
+      AIP_OLLAMA_BASE_URL: ${AIP_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts: ["host.docker.internal:host-gateway"]
     deploy:
       replicas: 2
     depends_on:
