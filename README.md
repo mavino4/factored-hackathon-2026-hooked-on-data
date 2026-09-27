@@ -106,6 +106,20 @@ make check                    # lint + tests (in-memory and SQLite)
 make test-postgres            # same storage tests against real Postgres (see above)
 ```
 
+## Evals
+
+`evals/` holds a small quality baseline. The cases are placeholders; replace them with 20–50 real
+questions. `evals/baseline.json` was recorded on local Ollama (`llama3.2:3b`), so re-record it on
+the real model before using it to compare.
+
+```bash
+AIP_PROVIDERS='["ollama"]' make eval                                   # compare with evals/baseline.json
+AIP_PROVIDERS='["ollama"]' uv run python evals/run.py --save-baseline  # record a new baseline
+```
+
+A route's model in `ROUTES` may only change if its eval score improves, or stays equal at lower
+cost. See [`evals/README.md`](evals/README.md).
+
 ## Before production
 
 - Create the production OIDC application/API in your provider (Auth0 recommended) and set `AIP_OIDC_*`.

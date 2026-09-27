@@ -1,9 +1,9 @@
-.PHONY: check lint test test-postgres smoke run migrate docker-build
+.PHONY: check lint test test-postgres smoke eval run migrate docker-build
 
 check: lint test
 
 lint:
-	uv run ruff check src tests scripts
+	uv run ruff check src tests scripts evals
 
 test:
 	uv run pytest -q
@@ -16,6 +16,9 @@ migrate:
 
 smoke:  # real provider from .env / AIP_PROVIDERS
 	uv run python scripts/smoke.py
+
+eval:  # quality baseline against the provider in .env / AIP_PROVIDERS
+	uv run python evals/run.py --compare evals/baseline.json
 
 run:
 	uv run uvicorn --factory aiplatform.api.app:create_app --reload
