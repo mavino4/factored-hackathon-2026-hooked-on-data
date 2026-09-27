@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ProviderName = Literal["anthropic", "bedrock", "vertex"]
+ProviderName = Literal["anthropic", "bedrock", "vertex", "ollama"]
 
 
 class Settings(BaseSettings):
@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Google Vertex AI - only needed when "vertex" is in `providers`.
     gcp_project_id: str | None = None
     gcp_region: str = "global"
+    # Local Ollama (Anthropic-compatible /v1/messages). For dev/testing without an API key.
+    # Every route uses this one local model when "ollama" is the serving provider.
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.2:3b"
 
     # Per-attempt timeout for one model call, in seconds.
     request_timeout_s: float = 120.0

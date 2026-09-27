@@ -34,6 +34,10 @@ def build_clients(settings: Settings) -> dict[str, Any]:
             clients[name] = AsyncAnthropicVertex(
                 project_id=settings.gcp_project_id, region=settings.gcp_region, **common
             )
+        elif name == "ollama":
+            # Ollama serves the Anthropic Messages API; it ignores the key but the SDK needs one.
+            clients[name] = AsyncAnthropic(base_url=settings.ollama_base_url, api_key="ollama",
+                                           **common)
     return clients
 
 

@@ -53,9 +53,9 @@ class StreamInterrupted(GatewayError):
 
 
 def build_params(route: Route, provider: str, *, system: str, messages: list[dict],
-                 tools: list[dict] | None) -> dict[str, Any]:
+                 tools: list[dict] | None, model: str | None = None) -> dict[str, Any]:
     params: dict[str, Any] = {
-        "model": route.model.id_for(provider),
+        "model": model or route.model.id_for(provider),
         "max_tokens": route.max_tokens,
         # Breakpoint 1: the frozen system prompt (and the tools, which render before it).
         "system": [{"type": "text", "text": system, "cache_control": CACHE}],
@@ -65,7 +65,7 @@ def build_params(route: Route, provider: str, *, system: str, messages: list[dic
     if tools:
         # Deterministic order: any change in the tool list invalidates the whole cache.
         params["tools"] = sorted(tools, key=lambda t: t["name"])
-    if route.model.supports_effort:
+    if route.model.supports_effort and model is None:
         params["thinking"] = {"type": "adaptive"}
         if route.effort:
             params["output_config"] = {"effort": route.effort}
@@ -92,6 +92,8 @@ class AIGateway:
             raise ValueError("at least one provider client is required")
         self._clients = clients
         self._settings = settings
+        # Providers that serve one configured model regardless of route (local dev).
+        self._model_overrides = {"ollama": settings.ollama_model}
         self._sleep = sleep
         self._breakers = {name: CircuitBreaker() for name in clients}
         # conversation_id -> provider that last served it. Bounded LRU, in-process.
@@ -120,7 +122,8 @@ class AIGateway:
         for provider in self._provider_order(conversation_id):
             client = self._clients[provider]
             breaker = self._breakers[provider]
-            params = build_params(route, provider, system=system, messages=messages, tools=tools)
+            params = build_params(route, provider, system=system, messages=messages, tools=tools,
+                                  model=self._model_overrides.get(provider))
             for attempt in range(self._settings.max_attempts_per_provider):
                 if not breaker.acquire():
                     break

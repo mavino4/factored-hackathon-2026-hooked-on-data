@@ -33,6 +33,19 @@ cp .env.example .env          # set ANTHROPIC_API_KEY
 make run
 ```
 
+Without a Claude API key, use a local Ollama model (Ollama serves the same Messages API):
+
+```bash
+ollama pull llama3.2:3b
+AIP_PROVIDERS='["ollama"]' make run
+```
+
+End-to-end smoke test against a real provider (chat streaming, history, agent tool call):
+
+```bash
+AIP_PROVIDERS='["ollama"]' uv run python scripts/smoke.py
+```
+
 Full stack (Postgres + 2 app replicas behind nginx, needs Docker):
 
 ```bash

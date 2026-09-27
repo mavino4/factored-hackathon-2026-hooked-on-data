@@ -130,3 +130,12 @@ async def test_sticky_map_is_bounded():
     for i in range(5):
         await collect(gw, conversation_id=f"c{i}")
     assert list(gw._sticky) == ["c3", "c4"]
+
+
+async def test_ollama_uses_the_configured_local_model():
+    client = FakeClient(text_reply("hi"))
+    settings = Settings(providers=["ollama"], ollama_model="llama3.2:3b")
+    gw = AIGateway({"ollama": client}, settings, sleep=no_sleep)
+    await collect(gw)
+    assert client.calls[0]["model"] == "llama3.2:3b"
+    assert "thinking" not in client.calls[0]
