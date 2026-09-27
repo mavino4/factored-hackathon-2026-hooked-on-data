@@ -1,0 +1,51 @@
+# Runs Alembic migrations. Apply and wait for it to complete BEFORE rolling out a
+# new Deployment image (see docs/deploy.md). Job specs are immutable: delete the
+# previous Job (or rely on ttlSecondsAfterFinished) before applying the next release.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aiplatform-migrate
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aiplatform
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: aiplatform
+          command: ["/app/.venv/bin/alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: aiplatform-config
+            - secretRef:
+                name: aiplatform-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

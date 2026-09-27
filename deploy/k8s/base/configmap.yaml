@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aiplatform-config
+data:
+  AIP_ENV: production
+  AIP_LOG_LEVEL: INFO
+  AIP_AUTH_MODE: oidc
+  AIP_OIDC_ISSUER: https://your-tenant.eu.auth0.com/
+  AIP_OIDC_AUDIENCE: https://api.your-app.example
+  AIP_OIDC_CLIENT_ID: replace-with-spa-client-id
+  AIP_PROVIDERS: '["anthropic"]'
+  AIP_ADMIN_USERS: '[]'
