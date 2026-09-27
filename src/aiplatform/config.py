@@ -3,6 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ProviderName = Literal["anthropic", "bedrock", "vertex", "ollama"]
@@ -13,6 +14,13 @@ class Settings(BaseSettings):
 
     env: Literal["dev", "production"] = "dev"
     log_level: str = "INFO"
+
+    # Authentication. "oidc": require a valid Bearer JWT from the configured issuer.
+    # "dev": trust the X-User-Id header - local development only, refused in production.
+    auth_mode: Literal["oidc", "dev"] = "oidc"
+    oidc_issuer: str | None = None  # e.g. https://your-tenant.eu.auth0.com/
+    oidc_audience: str | None = None  # the API identifier the tokens are issued for
+    oidc_jwks_url: str | None = None  # optional; discovered from the issuer when unset
 
     # e.g. postgresql+asyncpg://user:pass@host:5432/aiplatform. Unset = in-memory storage.
     database_url: str | None = None
@@ -39,6 +47,16 @@ class Settings(BaseSettings):
     # Per-user limits. The request rate is per replica; the token quota is shared via the DB.
     user_requests_per_minute: int = 20
     user_tokens_per_day: int = 500_000
+
+
+    @model_validator(mode="after")
+    def _check_auth(self) -> "Settings":
+        if self.auth_mode == "dev" and self.env == "production":
+            raise ValueError("AIP_AUTH_MODE=dev is not allowed when AIP_ENV=production")
+        if self.auth_mode == "oidc" and not (self.oidc_issuer and self.oidc_audience):
+            raise ValueError("AIP_AUTH_MODE=oidc needs AIP_OIDC_ISSUER and AIP_OIDC_AUDIENCE "
+                             "(or set AIP_AUTH_MODE=dev for local development)")
+        return self
 
 
 @lru_cache

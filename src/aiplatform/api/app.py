@@ -7,12 +7,13 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 import anthropic
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from aiplatform.agent.loop import AgentRunner
 from aiplatform.agent.tools import DEFAULT_TOOLS, Tool
+from aiplatform.auth import AuthError, OIDCVerifier
 from aiplatform.chat.inflight import ConversationBusy, InFlight
 from aiplatform.chat.repository import ConversationNotFound, InMemoryConversationRepository
 from aiplatform.chat.service import ChatService, ConversationTooLong, NothingToRegenerate
@@ -36,7 +37,8 @@ class UserMessage(BaseModel):
 
 
 def create_app(settings: Settings | None = None, gateway: AIGateway | None = None,
-               tools: list[Tool] | None = None) -> FastAPI:
+               tools: list[Tool] | None = None,
+               verifier: OIDCVerifier | None = None) -> FastAPI:
     settings = settings or get_settings()
 
     @asynccontextmanager
@@ -70,10 +72,29 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
 
     app = FastAPI(title="AI Platform", version="0.1.0", lifespan=lifespan)
 
-    def current_user(x_user_id: Annotated[str, Header()]) -> str:
-        # PLACEHOLDER auth: trusts a header. Replace with OIDC JWT verification
-        # before exposing this service outside a trusted network.
-        return x_user_id
+    if settings.auth_mode == "dev":
+        verifier = None
+    elif verifier is None:
+        verifier = OIDCVerifier(settings.oidc_issuer, settings.oidc_audience,
+                                jwks_url=settings.oidc_jwks_url)
+
+    async def current_user(request: Request) -> str:
+        if verifier is None:  # dev mode: trust a header (refused in production by Settings)
+            user_id = request.headers.get("x-user-id")
+            if not user_id:
+                raise HTTPException(401, "missing X-User-Id header (dev auth mode)")
+            return user_id
+        scheme, _, token = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            raise HTTPException(401, "missing bearer token",
+                                headers={"WWW-Authenticate": "Bearer"})
+        try:
+            principal = await verifier.verify(token)
+        except AuthError as exc:
+            raise HTTPException(401, str(exc), headers={
+                "WWW-Authenticate": 'Bearer error="invalid_token"'}) from None
+        request.state.principal = principal
+        return principal.user_id
 
     async def admit(request: Request, user_id: Annotated[str, Depends(current_user)]) -> str:
         state = request.app.state
@@ -203,5 +224,3 @@ async def _sse(events: AsyncIterator[TextDelta | Completed]) -> AsyncIterator[st
         log.exception("unexpected error in chat stream")
         yield _event("error", {"code": "internal", "message": "Something went wrong."})
 
-
-app = create_app()

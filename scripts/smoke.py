@@ -9,9 +9,14 @@ and one agent task that must call a tool. Providers come from the environment
 or the Claude API (needs ANTHROPIC_API_KEY):
 
     AIP_PROVIDERS='["anthropic"]' uv run python scripts/smoke.py
+
+In OIDC auth mode, pass tokens for two different users (e.g. from scripts/dev_oidc.py):
+
+    AIP_SMOKE_TOKEN=... AIP_SMOKE_TOKEN_OTHER=... uv run python scripts/smoke.py
 """
 
 import json
+import os
 import sys
 import time
 
@@ -20,7 +25,7 @@ from fastapi.testclient import TestClient
 from aiplatform.api.app import create_app
 from aiplatform.config import get_settings
 
-USER = {"X-User-Id": "smoke-test"}
+USER: dict[str, str] = {}
 CHAT_TURNS = [
     "Hi! My name is Ana. Reply in one short sentence.",
     "What's 12 times 7? Answer with just the number.",
@@ -56,10 +61,21 @@ def chat_turn(http: TestClient, cid: str, text: str) -> dict:
 
 def main() -> int:
     settings = get_settings()
-    print(f"providers={settings.providers}  "
+    other: dict[str, str]
+    if settings.auth_mode == "oidc":
+        USER["Authorization"] = f"Bearer {os.environ['AIP_SMOKE_TOKEN']}"
+        other = {"Authorization": f"Bearer {os.environ['AIP_SMOKE_TOKEN_OTHER']}"}
+    else:
+        USER["X-User-Id"] = "smoke-test"
+        other = {"X-User-Id": "someone-else"}
+    print(f"auth={settings.auth_mode}  providers={settings.providers}  "
           f"model={'ollama:' + settings.ollama_model if settings.providers[0] == 'ollama' else 'per ROUTES'}")
     failures = 0
     with TestClient(create_app(settings)) as http:
+        if settings.auth_mode == "oidc":
+            anon = http.get("/v1/conversations")
+            print(f"[auth] no token -> HTTP {anon.status_code} (expect 401)")
+            failures += anon.status_code != 401
         cid = http.post("/v1/conversations", json={"kind": "chat"}, headers=USER).json()["id"]
         for i, text in enumerate(CHAT_TURNS, 1):
             r = chat_turn(http, cid, text)
@@ -78,6 +94,11 @@ def main() -> int:
         print(f"\n[history] {roles}")
         if roles != ["user", "assistant"] * 3:
             print("  FAIL: unexpected history shape"); failures += 1
+
+        peek = http.get(f"/v1/conversations/{cid}", headers=other)
+        print(f"[isolation] another user reads this conversation -> HTTP {peek.status_code} "
+              "(expect 404)")
+        failures += peek.status_code != 404
 
         regen = http.post(f"/v1/conversations/{cid}/regenerate", headers=USER)
         print(f"[regenerate on answered conversation] HTTP {regen.status_code} (expect 409)")

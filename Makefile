@@ -18,7 +18,7 @@ smoke:  # real provider from .env / AIP_PROVIDERS
 	uv run python scripts/smoke.py
 
 run:
-	uv run uvicorn aiplatform.api.app:app --reload
+	uv run uvicorn --factory aiplatform.api.app:create_app --reload
 
 docker-build:
 	docker build -t aiplatform:dev .

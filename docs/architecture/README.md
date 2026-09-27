@@ -24,6 +24,7 @@ The real traffic is **6,000–10,000 per day**, not 1M concurrent. Even at 10× 
 | Agents | In-process tool loop with iteration cap, validation, approval gate | Durable workflows (Temporal) (ADR-0004) |
 | Storage | **Postgres** (SQLAlchemy + Alembic): conversations, append-only messages keyed by `(conversation_id, seq)`, usage events. In-memory for local dev only | Distributed SQL |
 | Limits | Per-user rate limit (per replica) + daily token quota (shared via `usage_events` in Postgres) | Redis-backed, degradation ladder (ADR-0005) |
+| Auth | **OIDC access tokens** (JWT, verified against the issuer's JWKS; any standard provider, Auth0 recommended). Dev-only header mode, refused in production | Same, plus roles/scopes per tool |
 | Hosting | Any container platform (Cloud Run, ECS/Fargate, Azure Container Apps, or a small K8s) | Kubernetes + GitOps |
 
 **Rough v1 cost on Haiku 4.5 ($1 / $5 per MTok):** at about $0.006 per request with the §2 token assumptions, 10,000 requests/day is about **$60/day** in model cost. If "10,000 per day" means users sending ~10 messages each, it's about $600/day. Agent runs take several model calls each, so they cost a multiple of that. Infrastructure is small by comparison.

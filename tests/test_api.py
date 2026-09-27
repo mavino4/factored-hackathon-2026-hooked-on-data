@@ -7,7 +7,8 @@ from tests.fakes import FakeClient, MidStreamFailure, status_error, text_reply
 
 
 def client_for(fake, **settings):
-    s = Settings(providers=["anthropic"], max_attempts_per_provider=1, **settings)
+    s = Settings(providers=["anthropic"], max_attempts_per_provider=1, auth_mode="dev",
+                 **settings)
     return TestClient(create_app(s, gateway=AIGateway({"anthropic": fake}, s)))
 
 
