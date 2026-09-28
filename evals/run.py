@@ -1,7 +1,10 @@
-"""Run the eval dataset against the configured model provider and score it.
+"""Run an eval dataset against the configured model provider and score it.
 
     uv run python evals/run.py [--dataset evals/dataset.jsonl] [--judge]
                                [--save-baseline] [--compare evals/baseline.json]
+
+Banking cases (evals/banking.jsonl) run the agent with the real banking tools against
+the core-banking DB (AIP_BANK_DATABASE_URL), as the case's `user` (e.g. eval-es).
 
 Providers come from the environment like the app (e.g. AIP_PROVIDERS='["ollama"]').
 Deterministic checks always run; --judge also asks the model to grade each answer
@@ -24,6 +27,8 @@ from typing import Any
 os.environ.setdefault("AIP_AUTH_MODE", "dev")
 
 from aiplatform.agent.tools import Tool, ToolContext
+from aiplatform.banking.repository import PostgresBankRepository
+from aiplatform.banking.tools import make_bank_tools
 from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT
 from aiplatform.config import get_settings
 from aiplatform.llm.gateway import AIGateway
@@ -71,6 +76,8 @@ class Case:
     history: list[dict] = field(default_factory=list)
     checks: dict[str, Any] = field(default_factory=dict)
     rubric: str = ""
+    user: str = "eval-user"  # session identity for tools (banking cases: eval-es, eval-pt...)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -110,6 +117,7 @@ class CaseResult:
     output_tokens: int
     cost: float
     judge: dict | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 def load_dataset(path: Path) -> list[Case]:
@@ -120,10 +128,86 @@ def load_dataset(path: Path) -> list[Case]:
     return cases
 
 
+NUMBER = re.compile(r"\d(?:[\d.,\u00a0\u202f ]*\d)?")
+
+
+def parse_number(token: str) -> float | None:
+    """Parse 1.234,56 / 1,234.56 / 1234.56 / 1 234,56 / 7.009.632 into a float."""
+    token = token.replace("\u00a0", "").replace("\u202f", "").replace(" ", "")
+    if "," in token and "." in token:
+        decimal = "," if token.rfind(",") > token.rfind(".") else "."
+    elif "," in token or "." in token:
+        sep = "," if "," in token else "."
+        parts = token.split(sep)
+        # A last group of 1-2 digits is a decimal mark (1.234,5 / 7.009.632.54 / 1,325,56);
+        # otherwise every separator groups thousands (7.009.632).
+        decimal = sep if len(parts[-1]) in (1, 2) else None
+        if decimal:
+            token = "".join(parts[:-1]) + decimal + parts[-1]
+    else:
+        decimal = None
+    thousands = {",", "."} - {decimal} if decimal else {",", "."}
+    for t in thousands:
+        token = token.replace(t, "")
+    if decimal:
+        token = token.replace(decimal, ".")
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
+def amounts_in(text: str) -> list[float]:
+    values = []
+    for match in NUMBER.findall(text):
+        value = parse_number(match.strip())
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def mentions_amount(text: str, expected: float) -> bool:
+    return any(abs(v - expected) < 0.011 for v in amounts_in(text))
+
+
+_ES = {"el", "los", "las", "y", "con", "una", "hay", "muy", "pero", "usted", "su", "sus",
+       "tarjeta", "ahorros", "ahorro", "gracias", "puedo", "ayudarle", "información", "del",
+       "al", "le", "tiene", "cuál", "ningún", "ninguna", "también", "saldos", "disponible",
+       "en", "tu", "aún", "préstamo", "cuenta", "límite", "debes", "hoy"}
+_PT = {"o", "os", "do", "da", "dos", "das", "com", "uma", "é", "não", "você", "sua", "seu",
+       "suas", "seus", "cartão", "poupança", "obrigado", "obrigada", "senhor", "senhora", "e",
+       "também", "há", "muito", "mas", "informação", "informações", "posso", "ajudar",
+       "possui", "ao", "pelo", "pela", "são", "está", "disponível", "tem", "nenhum", "mais",
+       "alguma", "algum", "pergunta", "estou", "à", "disposição", "tiver", "conta", "em",
+       "empréstimo", "vou", "preciso", "fornecer", "atualmente", "ainda"}
+
+
+def detect_language(text: str) -> str | None:
+    words = re.findall(r"[a-záéíóúâêôãõçñü]+", text.lower())
+    es, pt = sum(w in _ES for w in words), sum(w in _PT for w in words)
+    if es == pt:
+        return None
+    return "es" if es > pt else "pt"
+
+
 def check_answer(answer: Answer, checks: dict[str, Any]) -> list[str]:
     """Deterministic checks. Returns the list of failure reasons (empty = pass)."""
     failures = []
     text = answer.text.lower()
+    expected = checks.get("must_mention_amount")
+    for value in expected if isinstance(expected, list) else [expected] if expected else []:
+        if not mentions_amount(answer.text, value):
+            failures.append(f"amount {value} not mentioned")
+    for value in checks.get("must_not_mention_amount", []):
+        if mentions_amount(answer.text, value):
+            failures.append(f"mentions forbidden amount {value}")
+    if checks.get("no_amounts") and any(v >= 100 for v in amounts_in(answer.text)):
+        failures.append("states figures although it has no data")
+    if (lang := checks.get("language")) and (found := detect_language(answer.text)) != lang:
+        failures.append(f"language {found or 'unknown'} != {lang}")
+    for group in checks.get("must_include_each", []):
+        if not any(o.lower() in text for o in group):
+            failures.append(f"missing any of {group}")
     if (options := checks.get("must_include_any")) and not any(o.lower() in text for o in options):
         failures.append(f"missing any of {options}")
     for bad in checks.get("must_not_include", []):
@@ -221,13 +305,16 @@ async def judge(gateway: AIGateway, case: Case, answer: Answer, usage: Usage) ->
     return parse_judge(text_of(completed.message))
 
 
-async def run_case(gateway: AIGateway, case: Case, use_judge: bool) -> CaseResult:
+async def run_case(gateway: AIGateway, case: Case, use_judge: bool,
+                   tools: list[Tool] = GENERAL_TOOLS) -> CaseResult:
     usage = Usage()
     start = time.perf_counter()
     verdict = None
     try:
-        runner = run_agent if case.route == "agent" else run_chat
-        answer = await runner(gateway, case, usage)
+        if case.route == "agent":
+            answer = await run_agent(gateway, case, usage, tools, user_id=case.user)
+        else:
+            answer = await run_chat(gateway, case, usage)
         latency = time.perf_counter() - start
         failures = check_answer(answer, case.checks)
         if use_judge and case.rubric:
@@ -241,13 +328,26 @@ async def run_case(gateway: AIGateway, case: Case, use_judge: bool) -> CaseResul
     return CaseResult(id=case.id, route=case.route, passed=not failures, failures=failures,
                       answer=answer.text, tools_called=answer.tools_called,
                       latency_s=round(latency, 3), input_tokens=usage.input_tokens,
-                      output_tokens=usage.output_tokens, cost=usage.cost, judge=verdict)
+                      output_tokens=usage.output_tokens, cost=usage.cost, judge=verdict,
+                      tags=case.tags)
+
+
+def by_tag(results: list[CaseResult]) -> dict[str, dict]:
+    tags: dict[str, list[bool]] = {}
+    for r in results:
+        for tag in r.tags:
+            tags.setdefault(tag, []).append(r.passed)
+    return {tag: {"passed": sum(v), "total": len(v), "score": round(100 * sum(v) / len(v), 1)}
+            for tag, v in sorted(tags.items())}
 
 
 def summarize(results: list[CaseResult], meta: dict) -> dict:
     passed = sum(r.passed for r in results)
+    latencies = sorted(r.latency_s for r in results)
     return {
         **meta,
+        "by_tag": by_tag(results),
+        "latency_p50_s": latencies[len(latencies) // 2] if latencies else 0.0,
         "score": round(100 * passed / len(results), 1) if results else 0.0,
         "passed": passed,
         "total": len(results),
@@ -270,19 +370,46 @@ def print_table(summary: dict) -> None:
         notes = "; ".join(c["failures"])[:70]
         print(f"{c['id']:<26} {'PASS' if c['passed'] else 'FAIL':<6} {c['latency_s']:>7.2f}s "
               f"{c['input_tokens'] + c['output_tokens']:>8} {c['cost']:>10.5f}  {notes}")
+    if summary.get("by_tag"):
+        print("\nby tag: " + ", ".join(f"{tag} {v['passed']}/{v['total']}"
+                                        for tag, v in summary["by_tag"].items()))
     print(f"\nscore {summary['score']}% ({summary['passed']}/{summary['total']})  "
           f"tokens {summary['total_tokens']}  cost ${summary['total_cost']:.5f}")
+
+
+def needs_bank(cases: list[Case]) -> bool:
+    return any(c.user != "eval-user" for c in cases)
+
+
+def bank_url(settings) -> str:
+    if settings.bank_database_url is not None:
+        return settings.bank_database_url.get_secret_value()
+    return "postgresql+asyncpg://bank_reader:bank_reader@localhost:5432/bank"
+
+
+async def run_dataset(settings, cases: list[Case], use_judge: bool = False,
+                      warm_up: bool = False) -> list[CaseResult]:
+    """Run every case with one gateway; banking cases get the real banking tools."""
+    clients = build_clients(settings)
+    gateway = AIGateway(clients, settings)
+    bank = PostgresBankRepository(bank_url(settings)) if needs_bank(cases) else None
+    tools = make_bank_tools(bank) if bank else GENERAL_TOOLS
+    try:
+        if warm_up:  # load a local model onto the GPU before timing anything
+            await gateway.complete(ROUTES["chat"], system="Reply OK.",
+                                   messages=[{"role": "user", "content": "OK"}])
+        return [await run_case(gateway, case, use_judge, tools) for case in cases]
+    finally:
+        await close_clients(clients)
+        if bank:
+            await bank.close()
 
 
 async def main_async(args: argparse.Namespace) -> int:
     settings = get_settings()
     cases = load_dataset(Path(args.dataset))
-    clients = build_clients(settings)
-    gateway = AIGateway(clients, settings)
-    try:
-        results = [await run_case(gateway, case, args.judge) for case in cases]
-    finally:
-        await close_clients(clients)
+    results = await run_dataset(settings, cases, args.judge,
+                                warm_up="ollama" in settings.providers)
 
     meta = {"timestamp": datetime.now(UTC).isoformat(), "providers": settings.providers,
             "ollama_model": settings.ollama_model if "ollama" in settings.providers else None,
@@ -297,8 +424,8 @@ async def main_async(args: argparse.Namespace) -> int:
     out.write_text(json.dumps(summary, indent=2))
     print(f"results: {out}")
     if args.save_baseline:
-        (EVALS_DIR / "baseline.json").write_text(json.dumps(summary, indent=2))
-        print(f"baseline saved: {EVALS_DIR / 'baseline.json'}")
+        Path(args.baseline).write_text(json.dumps(summary, indent=2))
+        print(f"baseline saved: {args.baseline}")
 
     if args.compare:
         baseline = json.loads(Path(args.compare).read_text())
@@ -316,6 +443,8 @@ def main() -> int:
     parser.add_argument("--dataset", default=str(EVALS_DIR / "dataset.jsonl"))
     parser.add_argument("--judge", action="store_true", help="also grade with an LLM judge")
     parser.add_argument("--save-baseline", action="store_true")
+    parser.add_argument("--baseline", default=str(EVALS_DIR / "baseline.json"),
+                        help="where --save-baseline writes")
     parser.add_argument("--compare", metavar="BASELINE_JSON")
     return asyncio.run(main_async(parser.parse_args()))
 

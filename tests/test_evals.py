@@ -82,3 +82,56 @@ async def test_judge_failure_fails_the_case_and_errors_are_caught():
     crashed = await run_case(gateway(FakeClient(RuntimeError("boom"))), case, use_judge=False)
     assert not crashed.passed and "boom" in crashed.failures[0]
     assert summarize([result, crashed], {})["score"] == 0.0
+
+
+def test_amounts_are_found_in_any_number_format():
+    from evals.run import amounts_in, mentions_amount
+    for text in ("Su saldo es 7.009.632,54 COP", "Your balance is 7,009,632.54 COP",
+                 "saldo: 7009632.54", "saldo 7 009 632,54 COP", "saldo de COP $7.009.632,54"):
+        assert mentions_amount(text, 7009632.54), text
+    assert not mentions_amount("Su límite es 14.868.083,82 COP", 148680983.82)
+    assert mentions_amount("tasa de 24,96 %", 24.96)
+    assert mentions_amount("US$ 5.457,20", 5457.2) and mentions_amount("5,457.20 USD", 5457.2)
+    assert amounts_in("30 días de atraso") == [30.0]
+
+
+def test_language_detection():
+    from evals.run import detect_language
+    assert detect_language("El saldo de su tarjeta de crédito es de 100 USD.") == "es"
+    assert detect_language("O saldo do seu cartão de crédito é de 100 USD.") == "pt"
+    assert detect_language("OK") is None
+
+
+def test_banking_checks():
+    from evals.run import Answer, check_answer
+    good = Answer(text="O saldo do seu cartão de crédito é 1.325,56 USD.",
+                  tools_called=["get_products"])
+    assert check_answer(good, {"must_call_tool": "get_products", "must_mention_amount": 1325.56,
+                               "language": "pt", "must_not_include": ["R$"]}) == []
+    wrong = Answer(text="Su límite es 14.868.083,82 COP y tiene 5000 COP.")
+    failures = check_answer(wrong, {"must_mention_amount": 148680983.82, "language": "pt",
+                                    "must_not_mention_amount": [5000.0], "no_amounts": True,
+                                    "must_include_each": [["ahorro"], ["límite"]]})
+    assert len(failures) == 5
+
+
+def test_banking_dataset_is_well_formed():
+    cases = load_dataset(Path("evals/banking.jsonl"))
+    assert len(cases) >= 20 and len({c.id for c in cases}) == len(cases)
+    assert {c.user for c in cases} == {"eval-es", "eval-pt", "eval-unlinked"}
+    assert {"es", "pt"} <= {t for c in cases for t in c.tags}
+    for c in cases:
+        assert c.route == "agent" and c.checks.get("language") in ("es", "pt")
+
+
+def test_checks_accept_real_model_formats():
+    # Real answers from the llama3.2:3b / qwen2.5:7b comparison.
+    from evals.run import detect_language, mentions_amount
+    assert mentions_amount("saldo de 10.837.232.70 COP", 10837232.70)
+    assert mentions_amount("é de US$ 1,325,56", 1325.56)
+    assert mentions_amount("crédito de 2.437.90 USD", 2437.90)
+    assert not mentions_amount("es de 10.83.232,70 COP", 10837232.70)  # a digit is missing
+    assert not mentions_amount("es de 70.096.325.4 COP", 7009632.54)  # shifted digits
+    assert mentions_amount("7.009.632 COP", 7009632)
+    assert detect_language("De nada. Se tiver mais alguma pergunta, estou à disposição.") == "pt"
+    assert detect_language("Actualmente, aún debes $10,409.43 USD en tu préstamo personal.") == "es"

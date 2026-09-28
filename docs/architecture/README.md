@@ -25,6 +25,7 @@ The real traffic is **6,000–10,000 per day**, not 1M concurrent. Even at 10× 
 | Storage | **Postgres** (SQLAlchemy + Alembic): conversations, append-only messages keyed by `(conversation_id, seq)`, usage events. In-memory for local dev only | Distributed SQL |
 | Limits | Per-user rate limit (per replica) + daily token quota (shared via `usage_events` in Postgres) | Redis-backed, degradation ladder (ADR-0005) |
 | Auth | **OIDC access tokens** (JWT, verified against the issuer's JWKS; any standard provider, Auth0 recommended). Dev-only header mode, refused in production | Same, plus roles/scopes per tool |
+| Banking data | **External core-banking DB** (Datathon customers/products, no PII) read through the tools `get_customer_profile` / `get_products`. The read-only role `bank_reader` plus **Postgres Row-Level Security** keyed on the session's token `sub` (`app.subject`): the DB itself only shows the authenticated customer's rows | The bank's real core system / API with the same per-customer scoping |
 | UI | **Web chat UI** served by the API (plain JS, strict CSP): streaming chat, conversation list, agent tool calls, approval cards, OIDC login with PKCE | Separate frontend app/CDN if it grows |
 | Hosting | Any container platform (Cloud Run, ECS/Fargate, Azure Container Apps, or a small K8s) | Kubernetes + GitOps |
 

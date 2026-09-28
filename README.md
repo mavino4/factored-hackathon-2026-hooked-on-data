@@ -133,6 +133,35 @@ make test-postgres            # same storage tests against real Postgres (see ab
 - `GET /readyz` checks the database; `GET /healthz` is liveness only.
 - `GET /v1/admin/usage?days=7` gives a daily usage and cost report, for users listed in `AIP_ADMIN_USERS`.
 
+## Banking assistant (Spanish / Portuguese)
+
+The agent answers **balance questions about the signed-in customer's own products**
+(accounts, cards, loans), in the customer's language (Spanish or Portuguese).
+
+- **Data:** an external core-banking database loaded from the Datathon `customers` and
+  `products` tables with `make bank-db` (150k customers / 400k products). Only
+  non-sensitive columns are loaded: no documents, last names, birth dates, contact data,
+  income or credit scores, and product numbers keep only their last 4 digits.
+- **Isolation, enforced by the database:** the app connects as the read-only role
+  `bank_reader`, and every query sets `app.subject` to the user's verified token `sub`.
+  Postgres **Row-Level Security** only shows the customer linked to that subject in
+  `bank.customer_logins`. Without it, even `SELECT * FROM bank.products` returns 0 rows.
+  The model can never pass a customer or account ID to a tool. See
+  [`deploy/bankdb/schema.sql`](deploy/bankdb/schema.sql) and `tests/test_banking_postgres.py`.
+- **Tools:** `get_customer_profile` and `get_products` (read-only). Balances come with
+  their meaning (funds vs. amount owed), so the model doesn't confuse card debt with money.
+- **Demo users** (dev mode username, or dev issuer `sub`): `ana`, `bruno`, `carol`, `dave`,
+  `eval-es`, `eval-pt`; see [`deploy/bankdb/demo_logins.json`](deploy/bankdb/demo_logins.json).
+  Any other user isn't linked, and the assistant says it can't see account data.
+- **Out of scope for now:** card blocking, complaints, transactions, transfers. The
+  assistant says so and points to other channels.
+
+```bash
+docker compose up -d db && make bank-db     # once: load the bank DB
+AIP_BANK_DATABASE_URL=postgresql+asyncpg://bank_reader:bank_reader@localhost:5432/bank \
+AIP_PROVIDERS='["ollama"]' AIP_OLLAMA_MODEL=qwen2.5:7b make run
+```
+
 ## Evals
 
 `evals/` holds a small quality baseline. The cases are placeholders; replace them with 20–50 real
@@ -146,6 +175,18 @@ AIP_PROVIDERS='["ollama"]' uv run python evals/run.py   # free local run (don't 
 
 A route's model in `ROUTES` may only change if its eval score improves, or stays equal at lower
 cost. See [`evals/README.md`](evals/README.md).
+
+**Banking evals** (`evals/banking.jsonl`, 25 cases in es/pt) are built from the Datathon
+transcripts plus the figures in the bank DB (`make banking-cases`). They cover balances,
+available credit, limits, loans, days past due, the transcripts' follow-ups, out-of-scope
+requests and security (other people's data, PIN, prompt injection, unlinked users).
+Amounts are matched in any number format (`1.234,56` / `1,234.56`), and the reply language
+is checked.
+
+```bash
+make compare-models   # llama3.2:3b vs qwen2.5:7b on Ollama, by topic and language
+make eval-banking     # the provider configured in .env / AIP_PROVIDERS
+```
 
 ## Before production
 

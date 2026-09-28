@@ -110,6 +110,11 @@ class AIGateway:
             order.insert(0, sticky)
         return [p for p in order if self._breakers[p].available()]
 
+    def _first_event_timeout(self, route: Route, provider: str) -> float:
+        if provider == "ollama":  # local model may still be loading onto the GPU
+            return max(route.first_event_timeout_s, self._settings.ollama_first_event_timeout_s)
+        return route.first_event_timeout_s
+
     def _remember(self, conversation_id: str, provider: str) -> None:
         self._sticky[conversation_id] = provider
         self._sticky.move_to_end(conversation_id)
@@ -134,7 +139,7 @@ class AIGateway:
                 try:
                     # Fail fast if the provider stalls before sending anything; once the
                     # stream has started, the SDK's per-read timeout applies.
-                    async with asyncio.timeout(route.first_event_timeout_s) as deadline:
+                    async with asyncio.timeout(self._first_event_timeout(route, provider)) as deadline:
                         async with client.messages.stream(**params) as stream:
                             async for event in stream:
                                 if deadline.when() is not None:

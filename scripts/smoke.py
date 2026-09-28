@@ -1,29 +1,40 @@
-"""End-to-end smoke test against a REAL model provider (no fakes).
+"""End-to-end smoke test against a REAL model provider and the core-banking DB.
 
-Runs the whole app in-process: 3 streamed chat turns, a regenerate check,
-and one agent task that must call a tool. Providers come from the environment
-(.env), e.g. local Ollama:
+Runs the whole app in-process: 3 streamed chat turns (general questions), a regenerate
+check, and banking queries (card balance, available credit) whose figures are checked
+against the core-banking DB, for two different customers (ana, bruno). Providers come
+from the environment (.env), e.g. local Ollama:
 
-    AIP_PROVIDERS='["ollama"]' uv run python scripts/smoke.py
+    make bank-db   # once
+    AIP_PROVIDERS='["ollama"]' AIP_OLLAMA_MODEL=qwen2.5:7b uv run python scripts/smoke.py
 
 or the Claude API (needs ANTHROPIC_API_KEY):
 
     AIP_PROVIDERS='["anthropic"]' uv run python scripts/smoke.py
 
-In OIDC auth mode, pass tokens for two different users (e.g. from scripts/dev_oidc.py):
+In OIDC auth mode, pass tokens for ana and bruno (e.g. from scripts/dev_oidc.py):
 
-    AIP_SMOKE_TOKEN=... AIP_SMOKE_TOKEN_OTHER=... uv run python scripts/smoke.py
+    AIP_SMOKE_TOKEN=$(... token --sub ana) AIP_SMOKE_TOKEN_OTHER=$(... token --sub bruno) \
+    uv run python scripts/smoke.py
 """
 
+import asyncio
 import json
 import os
 import sys
 import time
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+os.environ.setdefault("AIP_BANK_DATABASE_URL",
+                      "postgresql+asyncpg://bank_reader:bank_reader@localhost:5432/bank")
+
 from aiplatform.api.app import create_app
+from aiplatform.banking.repository import PostgresBankRepository
 from aiplatform.config import get_settings
+from evals.run import mentions_amount
 
 USER: dict[str, str] = {}
 CHAT_TURNS = [
@@ -59,6 +70,21 @@ def chat_turn(http: TestClient, cid: str, text: str) -> dict:
             "deltas": len(chunks), **done}
 
 
+async def bank_truth(settings) -> dict[str, dict]:
+    """Credit-card figures for ana and bruno, read through the same RLS-scoped access."""
+    repo = PostgresBankRepository(settings.bank_database_url.get_secret_value())
+    try:
+        truth = {}
+        for user in ("ana", "bruno"):
+            [card] = await repo.get_products(user, "Tarjeta Crédito")
+            truth[user] = {"balance": float(card.current_balance),
+                           "available": float(card.available_credit),
+                           "currency": card.currency}
+        return truth
+    finally:
+        await repo.close()
+
+
 def main() -> int:
     settings = get_settings()
     other: dict[str, str]
@@ -66,8 +92,8 @@ def main() -> int:
         USER["Authorization"] = f"Bearer {os.environ['AIP_SMOKE_TOKEN']}"
         other = {"Authorization": f"Bearer {os.environ['AIP_SMOKE_TOKEN_OTHER']}"}
     else:
-        USER["X-User-Id"] = "smoke-test"
-        other = {"X-User-Id": "someone-else"}
+        USER["X-User-Id"] = "ana"
+        other = {"X-User-Id": "bruno"}
     print(f"auth={settings.auth_mode}  providers={settings.providers}  "
           f"model={'ollama:' + settings.ollama_model if settings.providers[0] == 'ollama' else 'per ROUTES'}")
     failures = 0
@@ -104,45 +130,31 @@ def main() -> int:
         print(f"[regenerate on answered conversation] HTTP {regen.status_code} (expect 409)")
         failures += regen.status_code != 409
 
-        aid = http.post("/v1/conversations", json={"kind": "agent"}, headers=USER).json()["id"]
-        start = time.perf_counter()
-        events = parse_sse(http.post(
-            f"/v1/conversations/{aid}/agent-runs", headers=USER,
-            json={"text": "What is the current UTC date and time? "
-                          "Use the get_current_time tool."}).text)
-        done = next((d for n, d in events if n == "done"), {})
-        print(f"\n[agent] {time.perf_counter() - start:.2f}s events="
-              f"{[n for n, _ in events if n != 'delta']} -> {done}")
-        if done.get("outcome") != "done":
-            print(f"  FAIL: agent run did not finish: {events[-1:]}"); failures += 1
-        elif "get_current_time" not in done.get("tool_calls", []):
-            print("  WARN: model answered without calling the tool (quality, not plumbing)")
-
-        # Approval flow: the irreversible tool must wait for the user's decision.
-        tid = http.post("/v1/conversations", json={"kind": "agent"}, headers=USER).json()["id"]
-        events = parse_sse(http.post(
-            f"/v1/conversations/{tid}/agent-runs", headers=USER,
-            json={"text": "Open a support ticket titled 'Printer broken' with details "
-                          "'Paper jam on floor 2'. Use the create_support_ticket tool."}).text)
-        approval = next((d for n, d in events if n == "approval_required"), None)
-        if approval is None:
-            print("\n[approval] WARN: model did not call create_support_ticket "
-                  "(quality, not plumbing)")
-        else:
-            print(f"\n[approval] pending: {approval['tool_name']} {approval['input']}")
-            decided = parse_sse(http.post(
-                f"/v1/conversations/{tid}/actions/{approval['action_id']}", headers=USER,
-                json={"decision": "approve"}).text)
-            result = next((d for n, d in decided if n == "tool_result"), {})
-            done = next((d for n, d in decided if n == "done"), {})
-            print(f"  approved -> tool_result={result.get('content')!r} done={done}")
-            if result.get("is_error") is not False or done.get("outcome") not in (
-                    "done", "approval_required"):
-                print(f"  FAIL: approval did not execute cleanly: {decided[-2:]}"); failures += 1
-            again = http.post(f"/v1/conversations/{tid}/actions/{approval['action_id']}",
-                              headers=USER, json={"decision": "approve"})
-            print(f"  approve twice -> HTTP {again.status_code} (expect 404)")
-            failures += again.status_code != 404
+        # Banking: figures must match the core-banking DB, per customer.
+        truth = asyncio.run(bank_truth(settings))
+        for label, headers in (("ana", USER), ("bruno", other)):
+            card = truth[label]
+            for question, key in (("¿Cuál es el saldo de mi tarjeta de crédito?", "balance"),
+                                  ("¿Cuánto crédito disponible me queda en la tarjeta?",
+                                   "available")):
+                aid = http.post("/v1/conversations", json={"kind": "agent"},
+                                headers=headers).json()["id"]
+                start = time.perf_counter()
+                events = parse_sse(http.post(f"/v1/conversations/{aid}/agent-runs",
+                                             headers=headers, json={"text": question}).text)
+                text = "".join(d["text"] for n, d in events if n == "delta")
+                calls = [d["name"] for n, d in events if n == "tool_call"]
+                ok = mentions_amount(text, card[key])
+                leaked = [u for u in truth if u != label and mentions_amount(text, truth[u][key])]
+                print(f"\n[bank:{label}] {question} ({time.perf_counter() - start:.1f}s)\n"
+                      f"  tools={calls} expected {key}={card[key]} {card['currency']}\n"
+                      f"  -> {text.strip()[:220]!r}")
+                if leaked:
+                    print(f"  FAIL: shows figures of {leaked}"); failures += 1
+                elif "get_products" not in calls:
+                    print("  WARN: model answered without calling get_products (quality)")
+                elif not ok:
+                    print("  WARN: figure differs from the DB (model quality, not plumbing)")
 
     print(f"\n{'PASS' if not failures else f'FAIL ({failures})'}")
     return 1 if failures else 0

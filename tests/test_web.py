@@ -26,7 +26,7 @@ def app_client(**settings):
 def test_ui_is_served_with_security_headers():
     with app_client() as http:
         page = http.get("/")
-        assert page.status_code == 200 and "<title>AI Assistant</title>" in page.text
+        assert page.status_code == 200 and 'src="/i18n.js"' in page.text
         csp = page.headers["content-security-policy"]
         assert "script-src 'self'" in csp and "frame-ancestors 'none'" in csp
         assert page.headers["x-content-type-options"] == "nosniff"
@@ -48,8 +48,22 @@ def test_ui_config_and_csp_allow_the_oidc_issuer():
 
 
 def test_ui_never_uses_innerhtml():
-    source = (ROOT / "src/aiplatform/web/app.js").read_text()
-    assert not re.search(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write", source)
+    for name in ("app.js", "i18n.js"):
+        source = (ROOT / "src/aiplatform/web" / name).read_text()
+        assert not re.search(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write", source)
+
+
+def test_translations_are_complete():
+    source = (ROOT / "src/aiplatform/web/i18n.js").read_text()
+    blocks = dict(re.findall(r"\n  (es|pt|en): \{(.*?)\n  \},", source, re.DOTALL))
+    keys = {lang: set(re.findall(r"^\s+(\w+):", body, re.MULTILINE))
+            for lang, body in blocks.items()}
+    assert set(keys) == {"es", "pt", "en"}
+    assert keys["es"] == keys["pt"] == keys["en"]
+    used = set(re.findall(r'\bt\("(\w+)"', (ROOT / "src/aiplatform/web/app.js").read_text()))
+    used |= set(re.findall(r'data-i18n(?:-[a-z-]+)?="(\w+)"',
+                           (ROOT / "src/aiplatform/web/index.html").read_text()))
+    assert used <= keys["en"], used - keys["en"]
 
 
 # --- dev OIDC issuer: authorization code + PKCE -----------------------------

@@ -43,7 +43,7 @@ function randomString(bytes = 32) {
 async function discovery() {
   const issuer = state.config.oidc_issuer.replace(/\/?$/, "/");
   const res = await fetch(`${issuer}.well-known/openid-configuration`);
-  if (!res.ok) throw new Error("Identity provider unavailable");
+  if (!res.ok) throw new Error(t("idp_unavailable"));
   return res.json();
 }
 
@@ -77,7 +77,9 @@ async function finishOidcLogin(code, returnedState) {
   const saved = JSON.parse(sessionStorage.getItem(PKCE_KEY) || "null");
   sessionStorage.removeItem(PKCE_KEY);
   history.replaceState(null, "", "/");
-  if (!saved || saved.state !== returnedState) throw new Error("Login failed: state mismatch");
+  if (!saved || saved.state !== returnedState) {
+    throw new Error(t("login_failed", { detail: "state mismatch" }));
+  }
   const meta = await discovery();
   const res = await fetch(meta.token_endpoint, {
     method: "POST",
@@ -90,7 +92,7 @@ async function finishOidcLogin(code, returnedState) {
       code_verifier: saved.verifier,
     }),
   });
-  if (!res.ok) throw new Error("Login failed: could not get a token");
+  if (!res.ok) throw new Error(t("login_failed", { detail: "no token" }));
   const token = await res.json();
   const stored = { access_token: token.access_token, expires_at: Date.now() + (token.expires_in || 3600) * 1000 };
   // Tab-scoped storage so a reload keeps you signed in; cleared when the tab closes.
@@ -119,7 +121,7 @@ async function initAuth() {
   }
   if (params.has("error")) {
     history.replaceState(null, "", "/");
-    throw new Error(`Login failed: ${params.get("error_description") || params.get("error")}`);
+    throw new Error(t("login_failed", { detail: params.get("error_description") || params.get("error") }));
   }
   const saved = JSON.parse(sessionStorage.getItem(TOKEN_KEY) || "null");
   if (saved && saved.expires_at > Date.now() + 30_000) {
@@ -158,14 +160,12 @@ async function logout() {
 // Remove every trace of the previous conversation and user from the page.
 function resetView() {
   $("conversation-list").replaceChildren();
-  $("chat-title").textContent = "Start a conversation";
+  $("chat-title").textContent = t("start");
   $("chat-kind").hidden = true;
   $("chat-kind").textContent = "";
   $("user-name").textContent = "";
   $("input").value = "";
-  messagesEl().replaceChildren(el("div", { class: "empty muted" },
-    "Choose New chat to talk with the assistant, or New agent task to let it use tools. "
-    + "Actions that change something always ask for your approval first."));
+  messagesEl().replaceChildren(el("div", { class: "empty muted" }, t("empty_state")));
   state.current = null;
   setBusy(false);
 }
@@ -176,9 +176,7 @@ function showLogin(errorMessage) {
   const dev = state.config.auth_mode === "dev";
   $("dev-login").hidden = !dev;
   $("oidc-login").hidden = dev;
-  $("login-hint").textContent = dev
-    ? "Local development mode: pick any username."
-    : "Sign in with your account to continue.";
+  $("login-hint").textContent = t(dev ? "login_hint_dev" : "login_hint_oidc");
   $("login-error").hidden = !errorMessage;
   $("login-error").textContent = errorMessage || "";
 }
@@ -199,7 +197,7 @@ async function api(path, { method = "GET", body } = {}) {
   const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   if (res.status === 401) {
     await logout();
-    throw new ApiError(401, "Your session expired. Please sign in again.");
+    throw new ApiError(401, t("session_expired"));
   }
   if (!res.ok) {
     let detail = res.statusText;
@@ -273,7 +271,7 @@ function addError(message, retry) {
   if (retry) {
     box.append(el("button", {
       onclick: () => { box.remove(); retry(); },
-    }, "Retry"));
+    }, t("retry")));
   }
   messagesEl().append(box);
   scrollToBottom();
@@ -281,17 +279,17 @@ function addError(message, retry) {
 
 function addApprovalCard(action) {
   const card = el("div", { class: "approval", "data-open": "" },
-    el("strong", {}, "Approval needed"),
-    el("span", {}, `The assistant wants to run ${action.tool_name} with:`),
+    el("strong", {}, t("approval_needed")),
+    el("span", {}, t("wants_to_run", { tool: action.tool_name })),
     el("pre", {}, JSON.stringify(action.input, null, 2)));
-  const approve = el("button", { class: "primary" }, "Approve");
-  const reject = el("button", {}, "Reject");
+  const approve = el("button", { class: "primary" }, t("approve"));
+  const reject = el("button", {}, t("reject"));
   approve.disabled = reject.disabled = state.busy;
   const decide = (decision) => {
     if (state.busy) return;
     card.removeAttribute("data-open");
     approve.disabled = reject.disabled = true;
-    card.append(el("span", { class: "muted" }, decision === "approve" ? "Approved." : "Rejected."));
+    card.append(el("span", { class: "muted" }, t(decision === "approve" ? "approved" : "rejected")));
     runStream(`/v1/conversations/${state.current.id}/actions/${action.action_id || action.id}`,
       { decision }, { startBubble: false });
   };
@@ -330,10 +328,14 @@ function renderHistory(messages, pendingActions) {
   if (!messages.length) {
     box.append(el("div", { class: "empty muted" },
       state.current.kind === "agent"
-        ? "Describe a task. The agent can use tools; actions that change something ask for approval."
-        : "Ask anything."));
+        ? t("empty_agent")
+        : t("empty_chat")));
   }
   scrollToBottom();
+}
+
+function defaultTitle(kind) {
+  return t(kind === "agent" ? "title_query" : "title_chat");
 }
 
 function renderConversationList() {
@@ -341,8 +343,8 @@ function renderConversationList() {
   list.replaceChildren();
   for (const conv of state.conversations) {
     const button = el("button", { onclick: () => openConversation(conv.id) },
-      el("span", { class: "title" }, conv.title || (conv.kind === "agent" ? "New agent task" : "New chat")),
-      el("span", { class: "badge" }, conv.kind));
+      el("span", { class: "title" }, conv.title || defaultTitle(conv.kind)),
+      el("span", { class: "badge" }, t(conv.kind === "agent" ? "kind_agent" : "kind_chat")));
     if (state.current && state.current.id === conv.id) button.setAttribute("aria-current", "true");
     list.append(el("li", {}, button));
   }
@@ -380,9 +382,9 @@ async function openConversation(id) {
     setBusy(false);
   }
   state.current = { id: conv.id, kind: conv.kind, title: conv.title };
-  $("chat-title").textContent = conv.title || (conv.kind === "agent" ? "New agent task" : "New chat");
+  $("chat-title").textContent = conv.title || defaultTitle(conv.kind);
   $("chat-kind").hidden = false;
-  $("chat-kind").textContent = conv.kind;
+  $("chat-kind").textContent = t(conv.kind === "agent" ? "kind_agent" : "kind_chat");
   renderHistory(conv.messages, conv.pending_actions);
   renderConversationList();
   setBusy(false);
@@ -444,7 +446,7 @@ async function runStream(path, body, { startBubble = true } = {}) {
     });
   } catch (err) {
     failed = true;
-    addError(err.message || "Connection lost.", state.current.kind === "chat"
+    addError(err.message || t("connection_lost"), state.current.kind === "chat"
       ? () => runStream(`/v1/conversations/${state.current.id}/regenerate`) : null);
   } finally {
     if (bubble && !bubble.textContent) bubble.parentElement.remove();
@@ -495,6 +497,7 @@ function guard(fn) {
 }
 
 async function boot() {
+  applyTranslations();
   state.config = await (await fetch("/config.json")).json();
 
   $("dev-login").addEventListener("submit", (event) => {
@@ -534,5 +537,5 @@ async function boot() {
 
 boot().catch((err) => {
   document.body.replaceChildren(el("p", { class: "error boot-error" },
-    `Could not start: ${err.message}`));
+    t("could_not_start", { error: err.message })));
 });

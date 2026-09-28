@@ -3,22 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Assistant</title>
+  <title>Bank assistant</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
   <!-- Login -->
   <main id="login" class="login" hidden>
     <div class="login-card">
-      <h1>AI Assistant</h1>
-      <p class="muted" id="login-hint">Sign in to continue.</p>
+      <h1 data-i18n="app_title">Bank assistant</h1>
+      <p class="muted" id="login-hint" data-i18n="login_hint">Sign in to continue.</p>
       <form id="dev-login" hidden>
-        <label for="dev-user">Username (dev mode)</label>
+        <label for="dev-user" data-i18n="username_label">Username (dev mode)</label>
         <input id="dev-user" required pattern="[A-Za-z0-9._\-]{1,40}" autocomplete="username">
-        <button type="submit" class="primary">Continue</button>
+        <button type="submit" class="primary" data-i18n="continue">Continue</button>
       </form>
-      <button id="oidc-login" class="primary" hidden>Sign in</button>
+      <button id="oidc-login" class="primary" hidden data-i18n="sign_in">Sign in</button>
       <p class="error" id="login-error" hidden></p>
     </div>
   </main>
@@ -27,33 +28,32 @@
   <div id="app" class="app" hidden>
     <aside class="sidebar">
       <div class="sidebar-actions">
-        <button id="new-chat" class="primary">+ New chat</button>
-        <button id="new-agent">+ New agent task</button>
+        <button id="new-agent" class="primary" data-i18n="new_query">+ New query</button>
+        <button id="new-chat" data-i18n="new_chat">+ General question</button>
       </div>
       <nav>
         <ul id="conversation-list" class="conversation-list"></ul>
       </nav>
       <div class="sidebar-footer">
         <span id="user-name" class="muted"></span>
-        <button id="logout" class="link">Sign out</button>
+        <button id="logout" class="link" data-i18n="sign_out">Sign out</button>
       </div>
     </aside>
 
     <section class="chat">
       <header class="chat-header">
-        <button id="toggle-sidebar" class="icon" aria-label="Conversations">☰</button>
-        <h2 id="chat-title">Start a conversation</h2>
+        <button id="toggle-sidebar" class="icon" aria-label="Conversations"
+                data-i18n-aria-label="conversations">☰</button>
+        <h2 id="chat-title" data-i18n="start">Start a conversation</h2>
         <span id="chat-kind" class="badge" hidden></span>
       </header>
       <div id="messages" class="messages" aria-live="polite">
-        <div class="empty muted" id="empty-state">
-          Choose <strong>New chat</strong> to talk with the assistant, or <strong>New agent task</strong>
-          to let it use tools. Actions that change something always ask for your approval first.
-        </div>
+        <div class="empty muted" id="empty-state" data-i18n="empty_state"></div>
       </div>
       <form id="composer" class="composer">
-        <textarea id="input" rows="1" placeholder="Send a message…" maxlength="20000" disabled></textarea>
-        <button id="send" class="primary" type="submit" disabled>Send</button>
+        <textarea id="input" rows="1" placeholder="Send a message…" data-i18n-placeholder="placeholder"
+                  maxlength="20000" disabled></textarea>
+        <button id="send" class="primary" type="submit" disabled data-i18n="send">Send</button>
       </form>
     </section>
   </div>

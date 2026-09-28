@@ -1,0 +1,25 @@
+{
+  "rows": 171321,
+  "unique_conversations": 546,
+  "languages": {
+    "es": 171321
+  },
+  "customer_openings": [
+    "Buenas tardes, necesito consultar el saldo de mi tarjeta de crédito.",
+    "Hola, buenos días. Quisiera saber cuál es mi saldo actual en mi cuenta de ahorros."
+  ],
+  "customer_followups": [
+    "¿Y eso cuánto tiempo tarda?",
+    "Entiendo, muchas gracias.",
+    "Perfecto, eso es lo que necesitaba.",
+    "Muy bien, ¿hay algo más que deba saber?"
+  ],
+  "agent_lines": [
+    "Buenas tardes, claro que sí. Déjeme revisar esa información. Su saldo actual es {monto} {moneda} y su límite disponible es de {limite} {moneda}.",
+    "Buenos días, con gusto le ayudo. Permítame un momento para verificar su saldo. Su saldo actual es de {monto} {moneda}.",
+    "No hay problema, que tenga buen día.",
+    "Con gusto. ¿Hay algo más en lo que pueda ayudarle?",
+    "Claro, estoy para servirle.",
+    "Perfecto, ¿necesita algo más?"
+  ]
+}
