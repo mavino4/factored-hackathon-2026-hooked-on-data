@@ -9,6 +9,10 @@
 | **Growth target** | 1M+ concurrent users, spiky, global (§1 onward) |
 | **Stack** | Python 3.12, FastAPI, Anthropic Python SDK; light model (Claude Haiku 4.5) for first versions |
 
+**v1 as built:** [interactive diagram](bankbot-architecture.html) (open locally in a browser; each box links to its source lines at commit `0c76db2`). Spec: [`bankbot-architecture.json`](bankbot-architecture.json), generated with [Archify](https://github.com/tt-a1i/archify).
+
+![BankBot v1 architecture](bankbot-architecture.png)
+
 ---
 
 ## 0. Current phase: right-sized v1

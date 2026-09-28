@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "BankBot (AI Platform v1) — Architecture",
+    "output": "docs/architecture/bankbot-architecture.html",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:mavino4/DatathonFactored.git",
+      "link_mode": "local-only",
+      "revision": "0c76db2b00d6c58649dbbc209bb1101ae20d11b8"
+    }
+  },
+  "components": [
+    { "id": "webui", "type": "frontend", "label": "Web UI", "sublabel": "BankBot · es / pt / en", "pos": [40, 300], "size": [140, 64],
+      "sources": [
+        { "path": "src/aiplatform/web/app.js", "line": 202, "end_line": 218, "label": "API calls + SSE over POST" },
+        { "path": "src/aiplatform/web/app.js", "line": 472, "end_line": 473, "label": "sends UI language" },
+        { "path": "src/aiplatform/api/app.py", "line": 324, "end_line": 325, "label": "static mount" }
+      ] },
+    { "id": "lb", "type": "cloud", "label": "Load Balancer", "sublabel": "nginx / k8s Ingress", "pos": [280, 300], "size": [140, 64],
+      "sources": [
+        { "path": "deploy/nginx.conf", "line": 2, "end_line": 7 },
+        { "path": "deploy/k8s/base/ingress.yaml", "line": 1, "end_line": 28 }
+      ] },
+    { "id": "oidc", "type": "security", "label": "OIDC Issuer", "sublabel": "Auth0 · Keycloak · dev", "pos": [535, 110], "size": [140, 64],
+      "sources": [
+        { "path": "src/aiplatform/auth.py", "line": 44, "end_line": 103, "label": "JWT verify via JWKS" },
+        { "path": "src/aiplatform/web/app.js", "line": 51, "end_line": 98, "label": "code + PKCE login" }
+      ] },
+    { "id": "api", "type": "backend", "label": "FastAPI API", "sublabel": "OIDC · rate limit · quota", "pos": [520, 300], "size": [170, 64], "tag": "2 replicas",
+      "sources": [
+        { "path": "src/aiplatform/api/app.py", "line": 84, "end_line": 121, "label": "lifespan wiring" },
+        { "path": "src/aiplatform/api/app.py", "line": 167, "end_line": 193, "label": "current_user + admit" },
+        { "path": "deploy/k8s/base/deployment.yaml", "line": 1, "end_line": 10 }
+      ] },
+    { "id": "chat", "type": "backend", "label": "ChatService", "sublabel": "streamed chat turns", "pos": [800, 200], "size": [150, 64],
+      "sources": [
+        { "path": "src/aiplatform/chat/service.py", "line": 34, "end_line": 74 }
+      ] },
+    { "id": "agent", "type": "backend", "label": "AgentRunner", "sublabel": "tool loop · approvals", "pos": [800, 400], "size": [150, 64],
+      "sources": [
+        { "path": "src/aiplatform/agent/loop.py", "line": 85, "end_line": 137, "label": "run / decide / loop" },
+        { "path": "src/aiplatform/agent/loop.py", "line": 196, "end_line": 208, "label": "irreversible -> pending" }
+      ] },
+    { "id": "gateway", "type": "backend", "label": "AI Gateway", "sublabel": "retry · breaker · failover", "pos": [1070, 300], "size": [160, 64],
+      "sources": [
+        { "path": "src/aiplatform/llm/gateway.py", "line": 92, "end_line": 138 },
+        { "path": "src/aiplatform/llm/gateway.py", "line": 59, "end_line": 69, "label": "reply-language block" },
+        { "path": "src/aiplatform/llm/models.py", "line": 45, "end_line": 55, "label": "Haiku 4.5 profile" }
+      ] },
+    { "id": "providers", "type": "external", "label": "LLM Providers", "sublabel": "Claude · Bedrock · Vertex · Ollama", "pos": [1340, 300], "size": [200, 64],
+      "sources": [
+        { "path": "src/aiplatform/llm/providers.py", "line": 15, "end_line": 46 }
+      ] },
+    { "id": "appdb", "type": "database", "label": "App Postgres", "sublabel": "conversations · usage · actions", "pos": [330, 540], "size": [180, 64],
+      "sources": [
+        { "path": "src/aiplatform/storage/tables.py", "line": 10, "end_line": 65 },
+        { "path": "src/aiplatform/storage/sql.py", "line": 35, "end_line": 150 },
+        { "path": "src/aiplatform/api/app.py", "line": 91, "end_line": 99, "label": "SQL or in-memory" }
+      ] },
+    { "id": "bankdb", "type": "database", "label": "Bank DB", "sublabel": "RLS on app.subject", "pos": [665, 540], "size": [150, 64], "tag": "read-only",
+      "sources": [
+        { "path": "deploy/bankdb/schema.sql", "line": 60, "end_line": 79, "label": "RLS policies" },
+        { "path": "src/aiplatform/banking/repository.py", "line": 79, "end_line": 121 }
+      ] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "API process (FastAPI, in-process modules)", "wraps": ["api", "chat", "agent", "gateway"], "pad": 20 },
+    { "kind": "region", "label": "PostgreSQL 16", "wraps": ["appdb", "bankdb"], "pad": 16 }
+  ],
+  "connections": [
+    { "from": "webui", "to": "lb", "label": "HTTPS · SSE", "variant": "emphasis" },
+    { "from": "lb", "to": "api", "label": "proxy_pass", "variant": "emphasis" },
+    { "from": "webui", "to": "oidc", "label": "login (PKCE)", "variant": "security" },
+    { "from": "api", "to": "oidc", "label": "JWKS", "variant": "security" },
+    { "from": "api", "to": "chat", "label": "chat turn", "variant": "emphasis" },
+    { "from": "api", "to": "agent", "label": "agent run", "variant": "emphasis" },
+    { "from": "chat", "to": "gateway", "label": "stream", "variant": "emphasis" },
+    { "from": "agent", "to": "gateway", "label": "stream + tools", "variant": "emphasis" },
+    { "from": "gateway", "to": "providers", "label": "Messages API", "variant": "emphasis" },
+    { "from": "api", "to": "appdb", "label": "SQLAlchemy" },
+    { "from": "api", "to": "bankdb", "label": "GET /v1/me", "variant": "security" },
+    { "from": "agent", "to": "bankdb", "label": "bank tools", "variant": "security" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Security", "items": [
+      "Every /v1 call needs a Bearer JWT verified against the issuer's JWKS; dev header mode is refused in production",
+      "Bank DB access (bank tools and the /v1/me greeting name) sets app.subject to the token sub; Postgres RLS hides every other customer",
+      "The agent SSE stream shows tool progress only: no tool arguments or raw results reach the customer",
+      "Irreversible tools become pending actions and run only after the user approves"
+    ] },
+    { "dot": "violet", "title": "Reply language", "items": [
+      "The UI sends its language (es / pt / en) with every chat, agent, regenerate and approval request",
+      "It reaches the model as a separate system block after the cached prompt, so the prompt-cache prefix is unchanged"
+    ] },
+    { "dot": "cyan", "title": "Persistence", "items": [
+      "ChatService and AgentRunner append messages through the conversation repository built by the API",
+      "usage_events feed the daily token quota and GET /v1/admin/usage",
+      "Without AIP_DATABASE_URL, storage falls back to in-memory (dev only)"
+    ] },
+    { "dot": "slate", "title": "Not shown", "items": [
+      "Prometheus metrics on AIP_METRICS_PORT (default 9090)",
+      "Alembic migrate job, evals/ harness, and the dev OIDC issuer script"
+    ] }
+  ]
+}
