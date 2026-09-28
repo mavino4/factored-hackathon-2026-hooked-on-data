@@ -126,13 +126,43 @@ button.icon { border: 0; background: none; font-size: 1.2rem; padding: .25rem .5
 .msg.assistant .bubble { background: var(--assistant-bubble); }
 .msg.assistant .bubble:empty::after { content: "…"; color: var(--muted); }
 .note { font-size: .85rem; color: var(--muted); text-align: center; }
-.tool {
-  font-size: .82rem; background: var(--tool); color: var(--tool-text);
-  border-radius: 8px; padding: .35rem .6rem; align-self: flex-start;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere;
+
+/* Greeting and quick actions */
+.msg.greeting .bubble { background: var(--tool); color: var(--tool-text); }
+.quick-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.quick-actions button {
+  border-radius: 999px; padding: .45rem .9rem; font-size: .9rem;
+  border-color: var(--tool-text); color: var(--tool-text); background: var(--panel);
 }
-.tool.ok::before { content: "✓ "; color: var(--ok); }
-.tool.fail::before { content: "✗ "; color: var(--error); }
+.quick-actions button:hover:not(:disabled) { background: var(--tool); }
+
+/* Progress while BankBot works ("Consultando sus productos...") */
+.status {
+  display: flex; align-items: center; gap: .4rem; color: var(--muted); font-size: .9rem;
+  padding: .3rem .1rem;
+}
+.status .dots { display: inline-flex; gap: 3px; }
+.status .dots i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--muted);
+  animation: status-bounce 1.2s infinite ease-in-out;
+}
+.status .dots i:nth-child(2) { animation-delay: .15s; }
+.status .dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes status-bounce {
+  0%, 80%, 100% { opacity: .25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status .dots i { animation: none; opacity: .6; }
+}
+
+/* Language selector (top right) */
+.lang-select {
+  font: inherit; font-size: .85rem; padding: .3rem .4rem; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
+}
+.login { position: relative; }
+.login-lang { position: absolute; top: 16px; right: 16px; }
 .approval {
   border: 1px solid var(--warn-border); background: var(--warn); border-radius: var(--radius);
   padding: .8rem 1rem; display: grid; gap: .5rem;

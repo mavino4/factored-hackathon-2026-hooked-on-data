@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bank assistant</title>
+  <title>BankBot</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
@@ -11,8 +11,13 @@
 <body>
   <!-- Login -->
   <main id="login" class="login" hidden>
+    <select class="lang-select login-lang" aria-label="Language" data-i18n-aria-label="language">
+      <option value="es">Español</option>
+      <option value="pt">Português</option>
+      <option value="en">English</option>
+    </select>
     <div class="login-card">
-      <h1 data-i18n="app_title">Bank assistant</h1>
+      <h1 data-i18n="app_title">BankBot</h1>
       <p class="muted" id="login-hint" data-i18n="login_hint">Sign in to continue.</p>
       <form id="dev-login" hidden>
         <label for="dev-user" data-i18n="username_label">Username (dev mode)</label>
@@ -46,6 +51,12 @@
                 data-i18n-aria-label="conversations">☰</button>
         <h2 id="chat-title" data-i18n="start">Start a conversation</h2>
         <span id="chat-kind" class="badge" hidden></span>
+        <select id="lang-select" class="lang-select" aria-label="Language"
+                data-i18n-aria-label="language">
+          <option value="es">Español</option>
+          <option value="pt">Português</option>
+          <option value="en">English</option>
+        </select>
       </header>
       <div id="messages" class="messages" aria-live="polite">
         <div class="empty muted" id="empty-state" data-i18n="empty_state"></div>

@@ -32,7 +32,7 @@ from aiplatform.agent.loop import (
 )
 from aiplatform.agent.tools import Tool
 from aiplatform.auth import AuthError, OIDCVerifier
-from aiplatform.banking.repository import BankRepository, PostgresBankRepository
+from aiplatform.banking.repository import BankRepository, NotLinked, PostgresBankRepository
 from aiplatform.banking.tools import make_bank_tools
 from aiplatform.chat.inflight import ConversationBusy, InFlight
 from aiplatform.chat.repository import ConversationNotFound, InMemoryConversationRepository
@@ -104,6 +104,7 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         bank = bank_repo
         if bank is None and settings.bank_database_url is not None:
             bank = PostgresBankRepository(settings.bank_database_url.get_secret_value())
+        app.state.bank = bank
         agent_tools = tools
         if agent_tools is None:
             agent_tools = make_bank_tools(bank) if bank is not None else []
@@ -247,6 +248,20 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         conv = await request.app.state.repo.create(user_id, body.kind)
         return _summary(conv)
 
+    @app.get("/v1/me")
+    async def me(request: Request, user_id: Annotated[str, Depends(current_user)]) -> dict:
+        """Who is signed in, for the UI greeting. The name comes from the bank DB (RLS)."""
+        first_name = None
+        bank = request.app.state.bank
+        if bank is not None:
+            try:
+                first_name = (await bank.get_customer(user_id)).first_name
+            except NotLinked:
+                pass
+            except Exception:
+                log.warning("could not read the customer's name", exc_info=True)
+        return {"user_id": user_id, "first_name": first_name}
+
     @app.get("/v1/conversations")
     async def list_conversations(request: Request,
                                  user_id: Annotated[str, Depends(current_user)],
@@ -348,11 +363,12 @@ def _encode(event) -> list[str]:
                 "stop_reason": message.stop_reason,
                 "usage": {"input_tokens": message.usage.input_tokens,
                           "output_tokens": message.usage.output_tokens}})]
-        case ToolCall(id=id, name=name, input=args):
-            return [_event("tool_call", {"id": id, "name": name, "input": args})]
-        case ToolResult(id=id, name=name, is_error=is_error, content=content):
-            return [_event("tool_result", {"id": id, "name": name, "is_error": is_error,
-                                           "content": content[:2_000]})]
+        # Customers see progress ("consulting...") but not the tools' arguments or raw
+        # results; the model's answer is what they read.
+        case ToolCall(id=id, name=name):
+            return [_event("tool_call", {"id": id, "name": name})]
+        case ToolResult(id=id, name=name, is_error=is_error):
+            return [_event("tool_result", {"id": id, "name": name, "is_error": is_error})]
         case ApprovalRequired(action_id=action_id, tool_name=tool_name, input=args):
             return [_event("approval_required", {"action_id": action_id,
                                                  "tool_name": tool_name, "input": args})]

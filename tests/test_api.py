@@ -124,12 +124,47 @@ def test_agent_approval_flow_over_http():
 
         done = post(http, f"/v1/conversations/{cid}/actions/{action['id']}",
                     json={"decision": "approve"})
-        assert "event: tool_result" in done.text and "Ticket created: t" in done.text
+        assert "event: tool_result" in done.text and '"is_error": false' in done.text
+        assert "Ticket created: t" not in done.text  # raw tool output stays server-side
         assert "Ticket opened." in done.text
         conv = http.get(f"/v1/conversations/{cid}", headers={"X-User-Id": "u1"}).json()
         assert conv["pending_actions"] == []
         assert post(http, f"/v1/conversations/{cid}/actions/{action['id']}",
                     json={"decision": "approve"}).status_code == 404
+
+
+def test_me_returns_the_customer_name_from_the_bank():
+    from decimal import Decimal
+
+    from aiplatform.banking.repository import CustomerProfile, InMemoryBankRepository
+
+    bank = InMemoryBankRepository(
+        customers={"C1": CustomerProfile("Norma", "Colombia", None, None, "Active",
+                                         Decimal(1))},
+        products={}, logins={"ana": "C1"})
+    s = Settings(providers=["anthropic"], auth_mode="dev")
+    app = create_app(s, gateway=AIGateway({"anthropic": FakeClient()}, s), bank_repo=bank)
+    with TestClient(app) as http:
+        assert http.get("/v1/me", headers={"X-User-Id": "ana"}).json() == {
+            "user_id": "ana", "first_name": "Norma"}
+        assert http.get("/v1/me", headers={"X-User-Id": "bob"}).json() == {
+            "user_id": "bob", "first_name": None}  # not linked: greeted without a name
+        assert http.get("/v1/me").status_code == 401
+
+
+def test_agent_stream_hides_tool_arguments_and_results():
+    from tests.fakes import make_message
+    from tests.test_agent import DEFAULT_TOOLS as TEST_TOOLS
+    fake = FakeClient(
+        ([], make_message({"type": "tool_use", "id": "tu_1", "name": "get_current_time",
+                           "input": {}}, stop_reason="tool_use")),
+        text_reply("It is noon."))
+    with client_for(fake, tools=TEST_TOOLS) as http:
+        cid = new_conversation(http, kind="agent")
+        run = post(http, f"/v1/conversations/{cid}/agent-runs", json={"text": "time?"})
+    assert 'event: tool_call\ndata: {"id": "tu_1", "name": "get_current_time"}' in run.text
+    assert "12:00" not in run.text  # the tool's raw result isn't streamed
+    assert "It is noon." in run.text
 
 
 def test_two_replicas_share_conversations_through_the_database(tmp_path):

@@ -1,4 +1,4 @@
-// AI Assistant web UI. Plain JS, no build step.
+// BankBot web UI. Plain JS, no build step.
 // Security: every piece of server or model text is rendered with textContent, never as HTML.
 "use strict";
 
@@ -6,10 +6,16 @@ const $ = (id) => document.getElementById(id);
 const state = {
   config: null,
   auth: null,          // {header: {...}, user: "name"}
+  me: null,            // {user_id, first_name} for the greeting
   conversations: [],
   current: null,       // {id, kind, title}
+  draft: false,        // welcome view: a new query not saved until the first message
   busy: false,
 };
+
+// Most common questions (from the Datathon call transcripts), one click away.
+const QUICK_ACTIONS = ["qa_card_balance", "qa_savings_balance", "qa_available", "qa_overdue",
+  "qa_products"];
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -167,6 +173,8 @@ function resetView() {
   $("input").value = "";
   messagesEl().replaceChildren(el("div", { class: "empty muted" }, t("empty_state")));
   state.current = null;
+  state.draft = false;
+  state.me = null;
   setBusy(false);
 }
 
@@ -254,16 +262,28 @@ function addNote(text) {
   scrollToBottom();
 }
 
-function describeInput(input) {
-  const json = JSON.stringify(input ?? {});
-  return json.length > 160 ? `${json.slice(0, 160)}…` : json;
+// Progress while BankBot works: an animated line ("Consultando sus productos..."),
+// never the tools' names, arguments or raw results.
+function showStatus(text) {
+  let node = messagesEl().querySelector(".status");
+  if (!node) {
+    node = el("div", { class: "status", role: "status" },
+      el("span", { class: "status-text" }),
+      el("span", { class: "dots", "aria-hidden": "true" }, el("i"), el("i"), el("i")));
+  }
+  node.querySelector(".status-text").textContent = text;
+  messagesEl().append(node);  // keep it as the last element
+  scrollToBottom();
 }
 
-function addToolCall(name, input) {
-  const node = el("div", { class: "tool" }, `${name}(${describeInput(input)})`);
-  messagesEl().append(node);
-  scrollToBottom();
-  return node;
+function hideStatus() {
+  messagesEl().querySelector(".status")?.remove();
+}
+
+function statusFor(tool) {
+  const key = `status_${tool}`;
+  const text = t(key);
+  return text === key ? t("status_consulting") : text;
 }
 
 function addError(message, retry) {
@@ -291,7 +311,7 @@ function addApprovalCard(action) {
     approve.disabled = reject.disabled = true;
     card.append(el("span", { class: "muted" }, t(decision === "approve" ? "approved" : "rejected")));
     runStream(`/v1/conversations/${state.current.id}/actions/${action.action_id || action.id}`,
-      { decision }, { startBubble: false });
+      { decision });
   };
   approve.addEventListener("click", () => decide("approve"));
   reject.addEventListener("click", () => decide("reject"));
@@ -300,7 +320,8 @@ function addApprovalCard(action) {
   scrollToBottom();
 }
 
-// Render stored history: text, tool calls, approval notes. Tool results are summarized.
+// Render stored history: only what the customer said and BankBot answered.
+// Tool calls and their results stay behind the scenes.
 function renderHistory(messages, pendingActions) {
   const box = messagesEl();
   box.replaceChildren();
@@ -313,7 +334,6 @@ function renderHistory(messages, pendingActions) {
       } else {
         for (const block of content) {
           if (block.type === "text") addBubble("user", block.text);
-          // tool_result blocks: already represented by their tool call chip
         }
       }
       continue;
@@ -321,7 +341,6 @@ function renderHistory(messages, pendingActions) {
     const blocks = typeof content === "string" ? [{ type: "text", text: content }] : content;
     for (const block of blocks) {
       if (block.type === "text" && block.text.trim()) addBubble("assistant", block.text);
-      else if (block.type === "tool_use") addToolCall(block.name, block.input);
     }
   }
   for (const action of pendingActions || []) addApprovalCard(action);
@@ -356,7 +375,8 @@ function setBusy(busy) {
   $("new-agent").disabled = busy;
   // Approval buttons wait until the current reply has finished streaming.
   for (const button of document.querySelectorAll(".approval[data-open] button")) button.disabled = busy;
-  const disabled = busy || !state.current;
+  for (const button of document.querySelectorAll(".quick-actions button")) button.disabled = busy;
+  const disabled = busy || (!state.current && !state.draft);
   $("input").disabled = disabled;
   $("send").disabled = disabled;
   if (!disabled) $("input").focus();
@@ -382,6 +402,7 @@ async function openConversation(id) {
     setBusy(false);
   }
   state.current = { id: conv.id, kind: conv.kind, title: conv.title };
+  state.draft = false;
   $("chat-title").textContent = conv.title || defaultTitle(conv.kind);
   $("chat-kind").hidden = false;
   $("chat-kind").textContent = t(conv.kind === "agent" ? "kind_agent" : "kind_chat");
@@ -403,16 +424,55 @@ async function createConversation(kind) {
   await openConversation(conv.id);
 }
 
+// The welcome view: a new query with BankBot's greeting and quick actions. Nothing is
+// saved until the customer sends a message or picks an action.
+function showWelcome() {
+  if (state.busy) return;
+  $("app").classList.remove("sidebar-open");
+  state.current = null;
+  state.draft = true;
+  $("chat-title").textContent = t("title_query");
+  $("chat-kind").hidden = false;
+  $("chat-kind").textContent = t("kind_agent");
+  messagesEl().replaceChildren();
+  const name = state.me && state.me.first_name;
+  addBubble("assistant greeting", name ? t("greeting", { name }) : t("greeting_anon"));
+  const buttons = QUICK_ACTIONS.map((key) =>
+    el("button", { class: "quick", type: "button", onclick: guard(() => sendText(t(key))) }, t(key)));
+  messagesEl().append(el("div", { class: "quick-actions", role: "group",
+    "aria-label": t("quick_title") }, ...buttons));
+  renderConversationList();
+  setBusy(false);
+}
+
+// Re-render texts that were built in JavaScript after a language change.
+function refreshLanguage() {
+  if (!$("login").hidden) {
+    showLogin($("login-error").hidden ? undefined : $("login-error").textContent);
+    return;
+  }
+  renderConversationList();
+  if (state.draft) {
+    showWelcome();
+  } else if (state.current) {
+    $("chat-title").textContent = state.current.title || defaultTitle(state.current.kind);
+    $("chat-kind").textContent = t(state.current.kind === "agent" ? "kind_agent" : "kind_chat");
+  } else {
+    $("chat-title").textContent = t("start");
+  }
+}
+
 // Stream one reply (chat message, regenerate, agent run or approval decision).
-async function runStream(path, body, { startBubble = true } = {}) {
+async function runStream(path, body) {
   setBusy(true);
-  let bubble = startBubble ? addBubble("assistant") : null;
-  const tools = new Map();
+  let bubble = null;
   let failed = false;
+  showStatus(t("status_thinking"));
   try {
     await streamEvents(path, body, (name, data) => {
       switch (name) {
         case "delta":
+          hideStatus();
           if (!bubble) bubble = addBubble("assistant");
           bubble.textContent += data.text;
           scrollToBottom();
@@ -420,21 +480,20 @@ async function runStream(path, body, { startBubble = true } = {}) {
         case "tool_call":
           if (bubble && !bubble.textContent) bubble.parentElement.remove();
           bubble = null;
-          tools.set(data.id, addToolCall(data.name, data.input));
+          showStatus(statusFor(data.name));
           break;
-        case "tool_result": {
-          const chip = tools.get(data.id) || addToolCall(data.name, {});
-          chip.classList.add(data.is_error ? "fail" : "ok");
-          chip.title = data.content;
-          break;
-        }
+        case "tool_result":
+          break;  // progress only: the result reaches the customer through the answer
         case "approval_required":
+          hideStatus();
           addApprovalCard(data);
           break;
         case "refusal":
+          hideStatus();
           addNote(data.message);
           break;
         case "error":
+          hideStatus();
           failed = true;
           addError(data.message, state.current.kind === "chat" && data.code !== "busy"
             ? () => runStream(`/v1/conversations/${state.current.id}/regenerate`)
@@ -449,6 +508,7 @@ async function runStream(path, body, { startBubble = true } = {}) {
     addError(err.message || t("connection_lost"), state.current.kind === "chat"
       ? () => runStream(`/v1/conversations/${state.current.id}/regenerate`) : null);
   } finally {
+    hideStatus();
     if (bubble && !bubble.textContent) bubble.parentElement.remove();
     setBusy(false);
     if (!failed) loadConversations().catch(() => {});  // refresh titles/order
@@ -459,10 +519,29 @@ async function send(event) {
   event.preventDefault();
   const input = $("input");
   const text = input.value.trim();
-  if (!text || state.busy || !state.current) return;
+  if (!text || state.busy || (!state.current && !state.draft)) return;
   input.value = "";
   autoResize();
+  await sendText(text);
+}
+
+async function sendText(text) {
+  if (!text || state.busy || (!state.current && !state.draft)) return;
+  if (state.draft) {  // first message of a new query: create it now
+    setBusy(true);
+    let conv;
+    try {
+      conv = await (await api("/v1/conversations", { method: "POST", body: { kind: "agent" } })).json();
+    } finally {
+      setBusy(false);
+    }
+    state.current = { id: conv.id, kind: conv.kind, title: conv.title };
+    state.draft = false;
+    state.conversations.unshift(conv);
+    renderConversationList();
+  }
   messagesEl().querySelector(".empty")?.remove();
+  messagesEl().querySelector(".quick-actions")?.remove();
   addBubble("user", text);
   const path = state.current.kind === "agent"
     ? `/v1/conversations/${state.current.id}/agent-runs`
@@ -485,7 +564,13 @@ async function showApp() {
   $("app").hidden = false;
   $("user-name").textContent = state.auth.user;
   await loadConversations();
-  if (state.conversations.length) await openConversation(state.conversations[0].id);
+  try {
+    state.me = await (await api("/v1/me")).json();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return;  // already back at login
+    state.me = null;  // greet without a name
+  }
+  showWelcome();  // every session starts with a new query and BankBot's greeting
 }
 
 function guard(fn) {
@@ -510,7 +595,14 @@ async function boot() {
   $("oidc-login").addEventListener("click", () => startOidcLogin().catch((err) => showLogin(err.message)));
   $("logout").addEventListener("click", () => { logout(); });
   $("new-chat").addEventListener("click", guard(() => createConversation("chat")));
-  $("new-agent").addEventListener("click", guard(() => createConversation("agent")));
+  $("new-agent").addEventListener("click", guard(() => showWelcome()));
+  for (const select of document.querySelectorAll("select.lang-select")) {
+    select.value = LANG;
+    select.addEventListener("change", () => {
+      setLanguage(select.value);
+      refreshLanguage();
+    });
+  }
   $("composer").addEventListener("submit", guard(send));
   $("input").addEventListener("input", autoResize);
   $("input").addEventListener("keydown", (event) => {

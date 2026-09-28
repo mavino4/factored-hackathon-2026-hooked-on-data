@@ -40,17 +40,22 @@ REPLY_TIMEOUT_MS = 300_000  # local models can be slow on the first call
 UI = {  # the labels the browser should show in each language
     "es": {"continue": "Continuar", "new_query": "+ Nueva consulta",
            "title_query": "Nueva consulta", "sign_in": "Iniciar sesión",
-           "sign_out": "Cerrar sesión", "question": "¿Cuál es el saldo de mi tarjeta de crédito?"},
+           "sign_out": "Cerrar sesión", "hello": "¡Hola",
+           "quick": "Saldo de mi tarjeta de crédito", "status": "Consultando"},
     "pt": {"continue": "Continuar", "new_query": "+ Nova consulta",
            "title_query": "Nova consulta", "sign_in": "Entrar", "sign_out": "Sair",
-           "question": "Qual é o saldo do meu cartão de crédito?"},
+           "hello": "Olá", "quick": "Saldo do meu cartão de crédito", "status": "Consultando"},
 }
+# Things a customer must never see: tool names, arguments or raw results.
+HIDDEN = ["get_products", "get_customer_profile", "product_type", "balance_meaning"]
 
 
-async def card_balances(users: list[str]) -> dict[str, float]:
+async def bank_truth(users: list[str]) -> dict[str, dict]:
     repo = PostgresBankRepository(BANK_URL)
     try:
-        return {u: float((await repo.get_products(u, "Tarjeta Crédito"))[0].current_balance)
+        return {u: {"balance": float((await repo.get_products(u, "Tarjeta Crédito"))[0]
+                                     .current_balance),
+                    "first_name": (await repo.get_customer(u)).first_name}
                 for u in users}
     finally:
         await repo.close()
@@ -91,26 +96,43 @@ def watch_console(page: Page, errors: list[str]) -> None:
     page.on("pageerror", lambda exc: errors.append(str(exc)))
 
 
-def ask_balance(page: Page, lang: str, user: str, truth: dict[str, float]) -> None:
+def assert_welcome(page: Page, lang: str, user: str, truth: dict[str, dict]) -> None:
+    """Every session starts with a new query: greeting with the customer's name + quick actions."""
     ui = UI[lang]
-    page.get_by_role("button", name=ui["new_query"]).click()
-    expect(page.locator("#chat-title")).to_have_text(ui["title_query"])
-    expect(page.locator("#input")).to_be_enabled()
-    page.locator("#input").fill(ui["question"])
-    page.keyboard.press("Enter")
+    expect(page.locator("#chat-title")).to_have_text(ui["title_query"], timeout=10_000)
+    greeting = page.locator(".msg.greeting .bubble")
+    expect(greeting).to_contain_text(ui["hello"])
+    expect(greeting).to_contain_text(truth[user]["first_name"])
+    expect(greeting).to_contain_text("BankBot")
+    expect(page.locator(".quick-actions button")).to_have_count(5)
+    print(f"  greeting: {greeting.inner_text()!r}")
+
+
+def assert_nothing_hidden_is_shown(page: Page) -> None:
+    body = page.locator("#messages").inner_text()
+    leaked = [h for h in HIDDEN if h in body]
+    assert not leaked and page.locator(".tool").count() == 0, f"tool details visible: {leaked}"
+
+
+def ask_balance(page: Page, lang: str, user: str, truth: dict[str, dict]) -> None:
+    """Ask with the quick-action button; the answer must be the customer's own figure."""
+    ui = UI[lang]
+    page.get_by_role("button", name=ui["quick"]).click()
+    status = page.locator(".status")
+    expect(status).to_be_visible(timeout=10_000)
+    print(f"  progress shown: {status.inner_text()!r}")
+    expect(page.locator(".quick-actions")).to_have_count(0)
     expect(page.locator("#send")).to_be_enabled(timeout=REPLY_TIMEOUT_MS)
+    expect(status).to_have_count(0)
+    assert_nothing_hidden_is_shown(page)
     text = page.locator("#messages").inner_text()
-    chips = page.locator(".tool").all_inner_texts()
-    print(f"  [{user}] tools={chips} expected={truth[user]}")
     print(f"  [{user}] reply: {page.locator('.msg.assistant .bubble').last.inner_text()[:200]!r}")
-    others = [u for u in truth if u != user and mentions_amount(text, truth[u])]
+    others = [u for u in truth if u != user and mentions_amount(text, truth[u]["balance"])]
     assert not others, f"{user} sees figures of {others}"
-    if not any(c.startswith("get_products") for c in chips):
-        print(f"  WARN: model did not call get_products for {user} (model quality)")
-    elif not mentions_amount(text, truth[user]):
-        print(f"  WARN: figure shown to {user} differs from the DB (model quality)")
+    if mentions_amount(text, truth[user]["balance"]):
+        print(f"  OK: {user} sees their own balance from the DB ({truth[user]['balance']})")
     else:
-        print(f"  OK: {user} sees their own balance from the DB")
+        print(f"  WARN: figure shown to {user} differs from the DB (model quality)")
 
 
 def run_dev_mode(browser, truth) -> list[str]:
@@ -125,18 +147,37 @@ def run_dev_mode(browser, truth) -> list[str]:
         page.locator("#dev-user").fill("ana")
         page.get_by_role("button", name=ui["continue"]).click()
         expect(page.locator("#user-name")).to_have_text("ana")
+        assert_welcome(page, "es", "ana", truth)
         ask_balance(page, "es", "ana", truth)
+
+        # Language selector (top right): switches the texts and is remembered on reload.
+        page.locator("#lang-select").select_option("pt")
+        expect(page.locator("html")).to_have_attribute("lang", "pt")
+        expect(page.get_by_role("button", name=UI["pt"]["new_query"])).to_be_visible()
         page.reload()
-        expect(page.locator(".msg.user .bubble").first).to_have_text(ui["question"],
+        expect(page.locator("html")).to_have_attribute("lang", "pt")
+        assert_welcome(page, "pt", "ana", truth)  # a reload starts a new query
+        print("  language switched to pt and kept after reload")
+        page.locator("#lang-select").select_option("es")
+        expect(page.locator("html")).to_have_attribute("lang", "es")
+
+        # The previous query is in the sidebar; its history shows no tool details.
+        page.locator("#conversation-list button").first.click()
+        expect(page.locator(".msg.user .bubble").first).to_have_text(ui["quick"],
                                                                      timeout=10_000)
-        print("  reload: history restored")
+        assert_nothing_hidden_is_shown(page)
+        print("  history restored without tool details")
+
         page.get_by_role("button", name=ui["sign_out"]).click()
         page.locator("#dev-user").fill("bruno")
         page.get_by_role("button", name=ui["continue"]).click()
         expect(page.locator("#user-name")).to_have_text("bruno", timeout=10_000)
         page.wait_for_timeout(500)
         expect(page.locator("#conversation-list li")).to_have_count(0)
+        assert truth["ana"]["first_name"] not in page.locator("body").inner_text(), \
+            "bruno sees ana's name"
         print("  switched to bruno: clean session")
+        assert_welcome(page, "es", "bruno", truth)
         ask_balance(page, "es", "bruno", truth)
         page.close()
     return errors
@@ -163,6 +204,7 @@ def run_oidc_mode(browser, truth) -> list[str]:
         page.wait_for_url(f"{API}/")
         expect(page.locator("#user-name")).to_have_text("bruno", timeout=10_000)
         print("  signed in as bruno through the issuer's login page")
+        assert_welcome(page, "pt", "bruno", truth)
         ask_balance(page, "pt", "bruno", truth)
         page.get_by_role("button", name=ui["sign_out"]).click()
         page.get_by_role("button", name=ui["sign_in"]).click()
@@ -175,13 +217,14 @@ def run_oidc_mode(browser, truth) -> list[str]:
         page.wait_for_timeout(500)
         expect(page.locator("#conversation-list li")).to_have_count(0)
         print("  switched to ana: clean session")
+        assert_welcome(page, "pt", "ana", truth)
         ask_balance(page, "pt", "ana", truth)
         page.close()
     return errors
 
 
 def main() -> int:
-    truth = asyncio.run(card_balances(["ana", "bruno"]))
+    truth = asyncio.run(bank_truth(["ana", "bruno"]))
     with sync_playwright() as p:
         browser = p.chromium.launch()
         errors = run_dev_mode(browser, truth) + run_oidc_mode(browser, truth)

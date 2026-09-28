@@ -1,9 +1,11 @@
-// UI translations. The language follows the browser: Spanish, Portuguese, else English.
+// UI translations. The language follows the browser (Spanish, Portuguese, else English)
+// until the user picks one in the selector; that choice is remembered in this browser.
 "use strict";
 
 const I18N = {
   es: {
-    app_title: "Asistente del banco",
+    app_title: "BankBot",
+    language: "Idioma",
     login_hint: "Inicie sesión para continuar.",
     login_hint_dev: "Modo desarrollo local: elija cualquier usuario.",
     login_hint_oidc: "Inicie sesión con su cuenta para continuar.",
@@ -23,6 +25,18 @@ const I18N = {
       + "Pregunta general para dudas generales.",
     empty_agent: "Pregunte por el saldo de sus cuentas, tarjetas o préstamos.",
     empty_chat: "Haga su pregunta.",
+    greeting: "¡Hola, {name}! Soy BankBot. ¿En qué puedo ayudarte?",
+    greeting_anon: "¡Hola! Soy BankBot. ¿En qué puedo ayudarte?",
+    quick_title: "Consultas frecuentes",
+    qa_card_balance: "Saldo de mi tarjeta de crédito",
+    qa_savings_balance: "Saldo de mi cuenta de ahorros",
+    qa_available: "¿Cuánto crédito disponible tengo?",
+    qa_overdue: "¿Tengo pagos atrasados?",
+    qa_products: "¿Qué productos tengo?",
+    status_thinking: "Procesando su consulta",
+    status_consulting: "Consultando",
+    status_get_products: "Consultando sus productos",
+    status_get_customer_profile: "Consultando sus datos",
     placeholder: "Escriba su mensaje…",
     send: "Enviar",
     retry: "Reintentar",
@@ -39,7 +53,8 @@ const I18N = {
     login_failed: "No se pudo iniciar sesión: {detail}",
   },
   pt: {
-    app_title: "Assistente do banco",
+    app_title: "BankBot",
+    language: "Idioma",
     login_hint: "Entre para continuar.",
     login_hint_dev: "Modo de desenvolvimento local: escolha qualquer usuário.",
     login_hint_oidc: "Entre com a sua conta para continuar.",
@@ -59,6 +74,18 @@ const I18N = {
       + "Pergunta geral para dúvidas gerais.",
     empty_agent: "Pergunte sobre o saldo das suas contas, cartões ou empréstimos.",
     empty_chat: "Faça a sua pergunta.",
+    greeting: "Olá, {name}! Sou o BankBot. Como posso ajudar você?",
+    greeting_anon: "Olá! Sou o BankBot. Como posso ajudar você?",
+    quick_title: "Consultas frequentes",
+    qa_card_balance: "Saldo do meu cartão de crédito",
+    qa_savings_balance: "Saldo da minha conta poupança",
+    qa_available: "Quanto crédito disponível eu tenho?",
+    qa_overdue: "Tenho pagamentos em atraso?",
+    qa_products: "Quais produtos eu tenho?",
+    status_thinking: "Processando a sua consulta",
+    status_consulting: "Consultando",
+    status_get_products: "Consultando os seus produtos",
+    status_get_customer_profile: "Consultando os seus dados",
     placeholder: "Escreva a sua mensagem…",
     send: "Enviar",
     retry: "Tentar novamente",
@@ -75,7 +102,8 @@ const I18N = {
     login_failed: "Não foi possível entrar: {detail}",
   },
   en: {
-    app_title: "Bank assistant",
+    app_title: "BankBot",
+    language: "Language",
     login_hint: "Sign in to continue.",
     login_hint_dev: "Local development mode: pick any username.",
     login_hint_oidc: "Sign in with your account to continue.",
@@ -95,6 +123,18 @@ const I18N = {
       + "for general questions.",
     empty_agent: "Ask about the balance of your accounts, cards or loans.",
     empty_chat: "Ask anything.",
+    greeting: "Hi, {name}! I'm BankBot. How can I help you?",
+    greeting_anon: "Hi! I'm BankBot. How can I help you?",
+    quick_title: "Frequent questions",
+    qa_card_balance: "My credit card balance",
+    qa_savings_balance: "My savings account balance",
+    qa_available: "How much credit do I have available?",
+    qa_overdue: "Do I have overdue payments?",
+    qa_products: "What products do I have?",
+    status_thinking: "Working on your request",
+    status_consulting: "Checking",
+    status_get_products: "Checking your products",
+    status_get_customer_profile: "Checking your details",
     placeholder: "Send a message…",
     send: "Send",
     retry: "Retry",
@@ -112,17 +152,38 @@ const I18N = {
   },
 };
 
-const LANG = (() => {
+const LANGUAGES = { es: "Español", pt: "Português", en: "English" };
+const LANG_KEY = "aip.lang";
+
+function savedLanguage() {
+  try {
+    const lang = localStorage.getItem(LANG_KEY);
+    return lang in I18N ? lang : null;
+  } catch {
+    return null;  // storage blocked (private mode, etc.): fall back to the browser
+  }
+}
+
+function browserLanguage() {
   for (const tag of navigator.languages || [navigator.language || "en"]) {
     const base = tag.toLowerCase().split("-")[0];
     if (base in I18N) return base;
   }
   return "en";
-})();
+}
+
+let LANG = savedLanguage() || browserLanguage();
 
 function t(key, vars = {}) {
   const text = I18N[LANG][key] ?? I18N.en[key] ?? key;
   return text.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ""));
+}
+
+function setLanguage(lang) {
+  if (!(lang in I18N)) return;
+  LANG = lang;
+  try { localStorage.setItem(LANG_KEY, lang); } catch { /* not persisted */ }
+  applyTranslations();
 }
 
 // Static texts: data-i18n (text), data-i18n-placeholder, data-i18n-aria-label.
@@ -136,4 +197,5 @@ function applyTranslations(root = document) {
   for (const node of root.querySelectorAll("[data-i18n-aria-label]")) {
     node.setAttribute("aria-label", t(node.dataset.i18nAriaLabel));
   }
+  for (const select of root.querySelectorAll("select.lang-select")) select.value = LANG;
 }
