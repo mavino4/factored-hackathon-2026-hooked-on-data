@@ -18,6 +18,7 @@ import contextlib
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -32,7 +33,8 @@ from aiplatform.banking.repository import PostgresBankRepository
 from evals.run import mentions_amount
 
 API = "http://localhost:8765"
-ISSUER = "http://127.0.0.1:9000/"
+ISSUER_PORT = 9123  # not 9000: that port is often taken (e.g. Jupyter)
+ISSUER = f"http://127.0.0.1:{ISSUER_PORT}/"
 REPLY_TIMEOUT_MS = 300_000  # local models can be slow on the first call
 
 UI = {  # the labels the browser should show in each language
@@ -56,20 +58,26 @@ async def card_balances(users: list[str]) -> dict[str, float]:
 
 @contextlib.contextmanager
 def server(args: list[str], env: dict[str, str], health_url: str):
-    proc = subprocess.Popen(args, env={**os.environ, **env},
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        for _ in range(100):
-            with contextlib.suppress(OSError):
-                urllib.request.urlopen(health_url, timeout=1)
-                break
-            time.sleep(0.2)
-        else:
-            raise RuntimeError(f"server did not start: {args}")
-        yield
-    finally:
-        proc.terminate()
-        proc.wait(timeout=10)
+    with tempfile.NamedTemporaryFile("w+", prefix="e2e-server-", suffix=".log") as log:
+        proc = subprocess.Popen(args, env={**os.environ, **env}, stdout=log,
+                                stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 60
+            healthy = False
+            while time.monotonic() < deadline and proc.poll() is None:
+                with contextlib.suppress(OSError):
+                    urllib.request.urlopen(health_url, timeout=1)
+                    healthy = True
+                    break
+                time.sleep(0.3)
+            if not healthy:
+                log.seek(0)
+                raise RuntimeError(f"server did not start: {args}\n--- server log ---\n"
+                                   f"{log.read()[-2000:]}")
+            yield
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)
 
 
 def api_server(extra_env: dict[str, str]):
@@ -138,7 +146,8 @@ def run_oidc_mode(browser, truth) -> list[str]:
     print("\n[OIDC auth (authorization code + PKCE via the dev issuer), browser in pt-BR]")
     errors: list[str] = []
     ui = UI["pt"]
-    issuer = server([sys.executable, "scripts/dev_oidc.py", "serve"], {},
+    issuer = server([sys.executable, "scripts/dev_oidc.py", "serve", "--port", str(ISSUER_PORT)],
+                    {},
                     f"{ISSUER}.well-known/openid-configuration")
     oidc_env = {"AIP_AUTH_MODE": "oidc", "AIP_OIDC_ISSUER": ISSUER,
                 "AIP_OIDC_AUDIENCE": "aiplatform-dev", "AIP_OIDC_CLIENT_ID": "web-ui"}
