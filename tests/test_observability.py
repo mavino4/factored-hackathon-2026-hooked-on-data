@@ -111,3 +111,10 @@ def test_admin_usage_report(tmp_path):
 def test_admin_usage_needs_a_database():
     with client_for(admin_users=["boss"]) as http:
         assert http.get("/v1/admin/usage", headers={"X-User-Id": "boss"}).status_code == 501
+
+
+def test_prices_match_dated_model_snapshots():
+    from aiplatform.llm.models import FREE, HAIKU_4_5, prices_for
+    assert prices_for("claude-haiku-4-5-20251001") == HAIKU_4_5.prices
+    assert prices_for("claude-haiku-4-5") == HAIKU_4_5.prices
+    assert prices_for("llama3.2:3b") == FREE

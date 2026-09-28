@@ -99,6 +99,8 @@ FREE = Prices(input=0, output=0, cache_read=0, cache_write_5m=0)
 def prices_for(model_id: str) -> Prices:
     """Prices for a model ID as reported in responses (local models such as Ollama are free)."""
     for profile in (HAIKU_4_5, SONNET_5, OPUS_5):
-        if model_id == profile.id or model_id in profile.provider_ids.values():
+        # Responses may name a dated snapshot, e.g. claude-haiku-4-5-20251001.
+        if (model_id == profile.id or model_id.startswith(f"{profile.id}-")
+                or model_id in profile.provider_ids.values()):
             return profile.prices
     return FREE

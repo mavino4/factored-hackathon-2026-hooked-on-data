@@ -136,12 +136,12 @@ make test-postgres            # same storage tests against real Postgres (see ab
 ## Evals
 
 `evals/` holds a small quality baseline. The cases are placeholders; replace them with 20–50 real
-questions. `evals/baseline.json` was recorded on local Ollama (`llama3.2:3b`), so re-record it on
-the real model before using it to compare.
+questions. `evals/baseline.json` was recorded on Claude Haiku 4.5: 15/15, about $0.011 per full run.
 
 ```bash
-AIP_PROVIDERS='["ollama"]' make eval                                   # compare with evals/baseline.json
-AIP_PROVIDERS='["ollama"]' uv run python evals/run.py --save-baseline  # record a new baseline
+make eval                                          # compare with evals/baseline.json (Claude)
+uv run python evals/run.py --save-baseline         # record a new baseline
+AIP_PROVIDERS='["ollama"]' uv run python evals/run.py   # free local run (don't compare with Claude)
 ```
 
 A route's model in `ROUTES` may only change if its eval score improves, or stays equal at lower

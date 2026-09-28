@@ -28,7 +28,15 @@ The real traffic is **6,000–10,000 per day**, not 1M concurrent. Even at 10× 
 | UI | **Web chat UI** served by the API (plain JS, strict CSP): streaming chat, conversation list, agent tool calls, approval cards, OIDC login with PKCE | Separate frontend app/CDN if it grows |
 | Hosting | Any container platform (Cloud Run, ECS/Fargate, Azure Container Apps, or a small K8s) | Kubernetes + GitOps |
 
-**Rough v1 cost on Haiku 4.5 ($1 / $5 per MTok):** at about $0.006 per request with the §2 token assumptions, 10,000 requests/day is about **$60/day** in model cost. If "10,000 per day" means users sending ~10 messages each, it's about $600/day. Agent runs take several model calls each, so they cost a multiple of that. Infrastructure is small by comparison.
+**Measured v1 cost on Claude Haiku 4.5 ($1 / $5 per MTok), 2026-09-28** (smoke test + 15 eval cases, list prices):
+
+| Traffic | Measured | At 10,000 per day |
+|---|---|---|
+| Chat message, short conversation (~50–110 input tokens) | ~$0.00014 | ~$1.40/day |
+| Chat message with ~2,000 tokens of history (estimate from prices) | ~$0.0035 | ~$35/day |
+| Agent task (2–3 model calls; tool definitions add ~750 input tokens per call) | ~$0.002–0.0025 | ~$20–25/day |
+
+So 6,000–10,000 messages/day costs roughly **$2–35/day** in model usage, well under the earlier $60/day estimate. Prompt caching doesn't help yet: Haiku 4.5 only caches prompts of 4,096+ tokens, and v1 prompts are smaller (0 cache reads measured). The live figures are in `aip_llm_cost_usd_total` and `GET /v1/admin/usage`. Infrastructure is small by comparison.
 
 **Upgrade triggers:** move to the next column of a row when its signal appears. Examples: sustained >50 req/s, a second region needed for latency or residency, agent tasks running longer than one HTTP request, or eval scores showing Haiku isn't good enough for a route.
 
@@ -194,7 +202,7 @@ A single internal service that **every** model call goes through. Responsibiliti
 | **Retries** | Retry 429 / 5xx / 529 / connection errors with exponential backoff + full jitter, honoring `retry-after`. Never retry 400/401/403/404. Retry budget capped (≤10% extra load) to avoid retry storms. |
 | **Circuit breakers** | Per provider-region: open on sustained error/latency; half-open probes; route traffic to the next provider in the list. |
 | **Failover** | Primary: Claude API. Secondary: Bedrock, Vertex. Only use the **portable feature subset** on failover-eligible routes (§5.4). |
-| **Refusals** | Always check `stop_reason` before reading content. Handle `refusal`; on the Claude API use server-side `fallbacks`, on Bedrock/Vertex the SDK's client-side refusal fallback middleware. |
+| **Refusals** | Always check `stop_reason` before reading content (v1 does, for chat and agent). Refusal *fallbacks* (server-side `fallbacks` on the Claude API, the SDK's client-side middleware on Bedrock/Vertex) apply to Opus 5 / Fable-class models, not to Haiku 4.5. Enable them when a route is upgraded. |
 | **Metering** | Record `usage` (input, output, cache read, cache write tokens) per request → event bus → billing, quotas, dashboards. |
 | **Load shedding** | Priority classes (paid > free, interactive > background); executes the degradation ladder (§6.2). |
 | **Safety & policy** | Input/output moderation hooks, PII redaction before logging, tenant-level model allow-lists. |
