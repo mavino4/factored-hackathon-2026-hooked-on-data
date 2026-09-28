@@ -37,6 +37,9 @@ services:
       AIP_AUTH_MODE: ${AIP_AUTH_MODE:-dev}
       AIP_PROVIDERS: ${AIP_PROVIDERS:-["ollama"]}
       AIP_OLLAMA_BASE_URL: ${AIP_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      AIP_OLLAMA_MODEL: ${AIP_OLLAMA_MODEL:-qwen2.5:7b}
+      # External core-banking DB, read-only role with Row-Level Security (load it with `make bank-db`).
+      AIP_BANK_DATABASE_URL: postgresql+asyncpg://bank_reader:${AIP_BANK_READER_PASSWORD:-bank_reader}@db:5432/bank
     extra_hosts: ["host.docker.internal:host-gateway"]
     deploy:
       replicas: 2

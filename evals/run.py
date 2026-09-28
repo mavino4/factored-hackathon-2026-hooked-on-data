@@ -23,7 +23,7 @@ from typing import Any
 # Evals don't serve HTTP, so auth settings are irrelevant; don't require OIDC config.
 os.environ.setdefault("AIP_AUTH_MODE", "dev")
 
-from aiplatform.agent.tools import DEFAULT_TOOLS, Tool
+from aiplatform.agent.tools import Tool, ToolContext
 from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT
 from aiplatform.config import get_settings
 from aiplatform.llm.gateway import AIGateway
@@ -35,6 +35,28 @@ MAX_AGENT_ITERATIONS = 6
 MAX_SCORE_DROP = 5.0  # percentage points
 APPROVAL_TEXT = ("This action requires the user's approval and was NOT executed. "
                  "Describe what you intended to do and ask the user to confirm.")
+
+
+
+# Example tools for the general dataset (evals/dataset.jsonl).
+async def _current_time(args: dict, ctx: ToolContext) -> str:
+    return datetime.now(UTC).isoformat()
+
+
+async def _create_ticket(args: dict, ctx: ToolContext) -> str:
+    return f"Ticket created: {args['title']}"
+
+
+GENERAL_TOOLS = [
+    Tool("get_current_time", "Get the current date and time in UTC (ISO 8601).",
+         {"type": "object", "properties": {}, "additionalProperties": False}, _current_time),
+    Tool("create_support_ticket",
+         "Open a support ticket on behalf of the user. Use only after the user asks for it.",
+         {"type": "object",
+          "properties": {"title": {"type": "string"}, "details": {"type": "string"}},
+          "required": ["title", "details"], "additionalProperties": False},
+         _create_ticket, irreversible=True),
+]
 
 JUDGE_SYSTEM = ("You are a strict grader. Given a question, an answer and a rubric, decide if the "
                 "answer satisfies the rubric. Reply with ONLY a JSON object: "
@@ -141,7 +163,8 @@ async def run_chat(gateway: AIGateway, case: Case, usage: Usage) -> Answer:
     return Answer(text=text_of(completed.message))
 
 
-async def run_tool(tool: Tool | None, name: str, args: Any, answer: Answer) -> tuple[str, bool]:
+async def run_tool(tool: Tool | None, name: str, args: Any, answer: Answer,
+                   ctx: ToolContext) -> tuple[str, bool]:
     if tool is None:
         return f"unknown tool: {name}", True
     if error := tool.validate(args):
@@ -150,13 +173,17 @@ async def run_tool(tool: Tool | None, name: str, args: Any, answer: Answer) -> t
         return APPROVAL_TEXT, True
     answer.tools_executed.append(name)
     try:
-        return await asyncio.wait_for(tool.handler(args), tool.timeout_s), False
+        output = await asyncio.wait_for(tool.handler(args, ctx), tool.timeout_s)
+        if not isinstance(output, str):
+            output = json.dumps(output, default=str, ensure_ascii=False)
+        return output, False
     except Exception as exc:  # noqa: BLE001 - reported back to the model, not raised
         return f"tool failed: {type(exc).__name__}", True
 
 
 async def run_agent(gateway: AIGateway, case: Case, usage: Usage,
-                    tools: list[Tool] = DEFAULT_TOOLS) -> Answer:
+                    tools: list[Tool] = GENERAL_TOOLS, user_id: str = "eval-user") -> Answer:
+    ctx = ToolContext(user_id=user_id)
     by_name = {t.name: t for t in tools}
     definitions = [t.definition() for t in tools]
     messages = [*case.history, {"role": "user", "content": case.input}]
@@ -176,7 +203,7 @@ async def run_agent(gateway: AIGateway, case: Case, usage: Usage,
         for block in tool_uses:
             answer.tools_called.append(block.name)
             content, is_error = await run_tool(by_name.get(block.name), block.name,
-                                               block.input, answer)
+                                               block.input, answer, ctx)
             result = {"type": "tool_result", "tool_use_id": block.id, "content": content}
             if is_error:
                 result["is_error"] = True

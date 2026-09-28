@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # e.g. postgresql+asyncpg://user:pass@host:5432/aiplatform. Unset = in-memory storage.
     database_url: str | None = None
 
+    # External core-banking database, read-only role (bank_reader). Row-Level Security in
+    # that database limits every query to the customer linked to the session's user.
+    # e.g. postgresql+asyncpg://bank_reader:...@host:5432/bank. Unset = no banking tools.
+    bank_database_url: SecretStr | None = None
+
     # Provider order for failover. The first healthy provider wins; a conversation
     # sticks to the provider that served it so its prompt cache stays warm.
     providers: list[ProviderName] = ["anthropic"]

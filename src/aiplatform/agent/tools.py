@@ -1,8 +1,12 @@
-"""Tool registry for agents. Each tool is a typed definition plus an async handler."""
+"""Tool registry for agents. Each tool is a typed definition plus an async handler.
+
+Handlers receive the model's arguments AND a server-side ToolContext. Identity (who
+the user is) always comes from the context - the verified session - never from the
+model's arguments, so a tool can't be steered into reading another user's data.
+"""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 _JSON_TYPES: dict[str, tuple[type, ...]] = {
@@ -12,11 +16,17 @@ _JSON_TYPES: dict[str, tuple[type, ...]] = {
 
 
 @dataclass(frozen=True)
+class ToolContext:
+    user_id: str  # verified token `sub` (or the dev-mode user)
+    conversation_id: str | None = None
+
+
+@dataclass(frozen=True)
 class Tool:
     name: str
     description: str
     input_schema: dict[str, Any]
-    handler: Callable[[dict[str, Any]], Awaitable[str]]
+    handler: Callable[[dict[str, Any], ToolContext], Awaitable[Any]]
     # Irreversible actions (send, pay, delete) are never executed without human approval.
     irreversible: bool = False
     timeout_s: float = 30.0
@@ -40,39 +50,6 @@ class Tool:
             if expected and (not isinstance(value, expected)
                              or (isinstance(value, bool) and bool not in expected)):
                 return f"field {key} must be {props[key]['type']}"
+            if "enum" in props[key] and value not in props[key]["enum"]:
+                return f"field {key} must be one of {props[key]['enum']}"
         return None
-
-
-# --- Example tools. Replace with real integrations. ---------------------------
-
-async def _current_time(args: dict[str, Any]) -> str:
-    return datetime.now(UTC).isoformat()
-
-
-async def _create_ticket(args: dict[str, Any]) -> str:
-    return f"Ticket created: {args['title']}"
-
-
-DEFAULT_TOOLS: list[Tool] = [
-    Tool(
-        name="get_current_time",
-        description="Get the current date and time in UTC (ISO 8601).",
-        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-        handler=_current_time,
-    ),
-    Tool(
-        name="create_support_ticket",
-        description="Open a support ticket on behalf of the user. Use only after the user asks for it.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "Short summary of the problem."},
-                "details": {"type": "string", "description": "Full description."},
-            },
-            "required": ["title", "details"],
-            "additionalProperties": False,
-        },
-        handler=_create_ticket,
-        irreversible=True,
-    ),
-]

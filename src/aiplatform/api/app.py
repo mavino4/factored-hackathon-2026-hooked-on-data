@@ -30,8 +30,10 @@ from aiplatform.agent.loop import (
     ToolCall,
     ToolResult,
 )
-from aiplatform.agent.tools import DEFAULT_TOOLS, Tool
+from aiplatform.agent.tools import Tool
 from aiplatform.auth import AuthError, OIDCVerifier
+from aiplatform.banking.repository import BankRepository, PostgresBankRepository
+from aiplatform.banking.tools import make_bank_tools
 from aiplatform.chat.inflight import ConversationBusy, InFlight
 from aiplatform.chat.repository import ConversationNotFound, InMemoryConversationRepository
 from aiplatform.chat.service import ChatService, ConversationTooLong, NothingToRegenerate
@@ -66,7 +68,8 @@ class Decision(BaseModel):
 
 def create_app(settings: Settings | None = None, gateway: AIGateway | None = None,
                tools: list[Tool] | None = None,
-               verifier: OIDCVerifier | None = None) -> FastAPI:
+               verifier: OIDCVerifier | None = None,
+               bank_repo: BankRepository | None = None) -> FastAPI:
     settings = settings or get_settings()
 
     @asynccontextmanager
@@ -98,9 +101,18 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         app.state.quota = TokenQuota(usage, settings.user_tokens_per_day)
         app.state.limiter = RateLimiter(settings.user_requests_per_minute)
         app.state.chat = ChatService(gw, repo, usage, inflight)
-        app.state.agent = AgentRunner(gw, repo, usage, inflight, actions,
-                                      tools if tools is not None else DEFAULT_TOOLS)
+        bank = bank_repo
+        if bank is None and settings.bank_database_url is not None:
+            bank = PostgresBankRepository(settings.bank_database_url.get_secret_value())
+        agent_tools = tools
+        if agent_tools is None:
+            agent_tools = make_bank_tools(bank) if bank is not None else []
+            if bank is None:
+                log.warning("AIP_BANK_DATABASE_URL not set: the agent has no banking tools")
+        app.state.agent = AgentRunner(gw, repo, usage, inflight, actions, agent_tools)
         yield
+        if bank is not None and bank_repo is None:
+            await bank.close()
         if metrics_server is not None:
             metrics_server.shutdown()
         if clients:

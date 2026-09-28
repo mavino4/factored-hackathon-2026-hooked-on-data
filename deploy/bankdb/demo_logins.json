@@ -1,0 +1,26 @@
+{
+  "eval-es": {
+    "customer_id": "CLI-02QH1TBUTU8Y",
+    "profile": "Colombia, COP: savings + credit card with days past due (eval, Spanish)"
+  },
+  "eval-pt": {
+    "customer_id": "CLI-03OH1NSK6JL0",
+    "profile": "México, USD: savings + credit card + personal loan (eval, Portuguese)"
+  },
+  "ana": {
+    "customer_id": "CLI-00R1HD1YN0Z6",
+    "profile": "Colombia, COP: savings + credit card, all active"
+  },
+  "bruno": {
+    "customer_id": "CLI-053P01JIENZG",
+    "profile": "México, USD: credit card + personal loan"
+  },
+  "carol": {
+    "customer_id": "CLI-00C9ATRQWO07",
+    "profile": "Argentina, ARS: a Blocked credit card"
+  },
+  "dave": {
+    "customer_id": "CLI-014LNC1S8660",
+    "profile": "Any country: an investment and a savings account"
+  }
+}

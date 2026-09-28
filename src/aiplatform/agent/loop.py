@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from aiplatform.agent.actions import ActionStore, PendingAction
-from aiplatform.agent.tools import Tool
+from aiplatform.agent.tools import Tool, ToolContext
 from aiplatform.chat.inflight import InFlight
 from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT
 from aiplatform.chat.repository import Conversation, ConversationRepository
@@ -117,7 +117,8 @@ class AgentRunner:
                 if tool is None:
                     content, is_error = f"tool no longer available: {action.tool_name}", True
                 else:
-                    content, is_error = await self._invoke(tool, action.input)
+                    content, is_error = await self._invoke(
+                        tool, action.input, ToolContext(user_id, conv.id))
                 yield ToolResult(action.tool_use_id, action.tool_name, is_error, content)
                 result = f"ERROR: {content}" if is_error else content
             await self._repo.append(conv, {"role": "user", "content": decision_text(action, result)})
@@ -197,18 +198,19 @@ class AgentRunner:
             out = {"type": "tool_result", "tool_use_id": block.id,
                    "content": awaiting_approval_text(action)}
             return out, ApprovalRequired(action.id, block.name, block.input)
-        return result(*await self._invoke(tool, block.input))
+        return result(*await self._invoke(tool, block.input, ToolContext(user_id, conv.id)))
 
-    async def _invoke(self, tool: Tool, args: dict[str, Any]) -> tuple[str, bool]:
+    async def _invoke(self, tool: Tool, args: dict[str, Any],
+                      ctx: ToolContext) -> tuple[str, bool]:
         try:
-            output = await asyncio.wait_for(tool.handler(args), tool.timeout_s)
+            output = await asyncio.wait_for(tool.handler(args, ctx), tool.timeout_s)
         except TimeoutError:
             return "tool timed out", True
         except Exception as exc:
             log.exception("tool failed", extra={"tool": tool.name})
             return f"tool failed: {type(exc).__name__}", True
         if not isinstance(output, str):
-            output = json.dumps(output, default=str)
+            output = json.dumps(output, default=str, ensure_ascii=False)
         if len(output) > MAX_TOOL_RESULT_CHARS:
             output = output[:MAX_TOOL_RESULT_CHARS] + "\n[truncated: result too long]"
         return output, False

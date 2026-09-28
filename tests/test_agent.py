@@ -10,7 +10,7 @@ from aiplatform.agent.loop import (
     ToolCall,
     ToolResult,
 )
-from aiplatform.agent.tools import DEFAULT_TOOLS, Tool
+from aiplatform.agent.tools import Tool, ToolContext
 from aiplatform.chat.inflight import ConversationBusy, InFlight
 from aiplatform.chat.repository import InMemoryConversationRepository
 from aiplatform.config import Settings
@@ -19,6 +19,26 @@ from aiplatform.usage import InMemoryUsageStore
 from tests.fakes import FakeClient, make_message
 
 TICKET = {"title": "Printer broken", "details": "Paper jam on floor 2"}
+TICKET_SCHEMA = {"type": "object",
+                 "properties": {"title": {"type": "string"}, "details": {"type": "string"}},
+                 "required": ["title", "details"], "additionalProperties": False}
+SEEN_CONTEXTS: list[ToolContext] = []
+
+
+async def _current_time(args, ctx):
+    SEEN_CONTEXTS.append(ctx)
+    return "12:00"
+
+
+async def _ticket(args, ctx):
+    return f"Ticket created: {args['title']}"
+
+
+# Test tools: one read-only, one irreversible (goes through approval).
+DEFAULT_TOOLS = [
+    Tool("create_support_ticket", "d", TICKET_SCHEMA, _ticket, irreversible=True),
+    Tool("get_current_time", "d", {"type": "object", "properties": {}}, _current_time),
+]
 
 
 def tool_call(name, args, id="tu_1"):
@@ -54,6 +74,8 @@ async def test_runs_tool_and_streams_events():
     kinds = [type(e) for e in events]
     assert kinds == [ToolCall, ToolResult, AgentText, AgentDone]
     assert events[-1] == AgentDone("done", "It is noon.", ["get_current_time"])
+    # The tool got the session's identity from the server, not from the model.
+    assert SEEN_CONTEXTS[-1] == ToolContext(user_id="u1", conversation_id=conv.id)
     assert "is_error" not in last_tool_results(conv)[0]
     # Tools were sent on every call, in a stable order.
     assert [t["name"] for t in client.calls[0]["tools"]] == [
@@ -63,11 +85,11 @@ async def test_runs_tool_and_streams_events():
 async def test_irreversible_tool_becomes_pending_and_runs_only_after_approval():
     ran = []
 
-    async def create_ticket(args):
+    async def create_ticket(args, ctx):
         ran.append(args)
         return "Ticket #42 created"
 
-    ticket_tool = Tool("create_support_ticket", "d", DEFAULT_TOOLS[1].input_schema,
+    ticket_tool = Tool("create_support_ticket", "d", TICKET_SCHEMA,
                        create_ticket, irreversible=True)
     client = FakeClient(
         tool_call("create_support_ticket", TICKET),
@@ -97,11 +119,11 @@ async def test_irreversible_tool_becomes_pending_and_runs_only_after_approval():
 async def test_rejected_action_is_not_executed():
     ran = []
 
-    async def create_ticket(args):
+    async def create_ticket(args, ctx):
         ran.append(args)
         return "created"
 
-    ticket_tool = Tool("create_support_ticket", "d", DEFAULT_TOOLS[1].input_schema,
+    ticket_tool = Tool("create_support_ticket", "d", TICKET_SCHEMA,
                        create_ticket, irreversible=True)
     client = FakeClient(tool_call("create_support_ticket", TICKET), final("Waiting."),
                         final("OK, I won't."))
@@ -122,7 +144,7 @@ async def test_invalid_tool_input_is_reported_to_the_model():
 
 
 async def test_long_tool_results_are_truncated():
-    async def huge(_):
+    async def huge(args, ctx):
         return "x" * (MAX_TOOL_RESULT_CHARS + 500)
 
     tool = Tool("dump", "d", {"type": "object", "properties": {}}, huge)

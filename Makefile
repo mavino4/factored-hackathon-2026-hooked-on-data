@@ -1,4 +1,4 @@
-.PHONY: check lint test test-postgres smoke eval run migrate docker-build
+.PHONY: check lint test test-postgres smoke eval bank-db run migrate docker-build
 
 check: lint test
 
@@ -8,8 +8,13 @@ lint:
 test:
 	uv run pytest -q
 
-test-postgres:  # needs AIP_TEST_DATABASE_URL, e.g. from `docker compose up db`
+test-postgres:  # needs `docker compose up -d db`
+	AIP_TEST_DATABASE_URL=$${AIP_TEST_DATABASE_URL:-postgresql+asyncpg://aiplatform:aiplatform@localhost:5432/aiplatform_test} \
+	AIP_TEST_BANK_ADMIN_URL=$${AIP_TEST_BANK_ADMIN_URL:-postgresql://aiplatform:aiplatform@localhost:5432/postgres} \
 	uv run pytest -q -m postgres
+
+bank-db:  # load the simulated core-banking DB from ../data_clean (needs `docker compose up -d db`)
+	uv run --with pandas --with pyarrow python scripts/load_bank_db.py
 
 migrate:
 	uv run alembic upgrade head

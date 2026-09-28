@@ -6,10 +6,10 @@ from aiplatform.llm.gateway import AIGateway
 from tests.fakes import FakeClient, MidStreamFailure, status_error, text_reply
 
 
-def client_for(fake, **settings):
+def client_for(fake, tools=None, **settings):
     s = Settings(providers=["anthropic"], max_attempts_per_provider=1, auth_mode="dev",
                  **settings)
-    return TestClient(create_app(s, gateway=AIGateway({"anthropic": fake}, s)))
+    return TestClient(create_app(s, gateway=AIGateway({"anthropic": fake}, s), tools=tools))
 
 
 def new_conversation(http, user="u1", kind="chat"):
@@ -105,7 +105,8 @@ def test_agent_approval_flow_over_http():
                            "input": ticket}, stop_reason="tool_use")),
         text_reply("Please approve."),
         text_reply("Ticket opened."))
-    with client_for(fake) as http:
+    from tests.test_agent import DEFAULT_TOOLS as TEST_TOOLS
+    with client_for(fake, tools=TEST_TOOLS) as http:
         cid = new_conversation(http, kind="agent")
         run = post(http, f"/v1/conversations/{cid}/agent-runs", json={"text": "open a ticket"})
         assert "event: approval_required" in run.text

@@ -42,6 +42,8 @@ jobs:
           --health-retries 30
     env:
       AIP_TEST_DATABASE_URL: postgresql+asyncpg://aiplatform:aiplatform@localhost:5432/aiplatform_test
+      # Superuser URL: the banking isolation tests create their own bank_test DB and role.
+      AIP_TEST_BANK_ADMIN_URL: postgresql://aiplatform:aiplatform@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
