@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ProviderName = Literal["anthropic", "bedrock", "vertex", "ollama"]
@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # Provider order for failover. The first healthy provider wins; a conversation
     # sticks to the provider that served it so its prompt cache stays warm.
     providers: list[ProviderName] = ["anthropic"]
+
+    # Claude API key. Read from ANTHROPIC_API_KEY (environment or .env) and passed to the
+    # SDK explicitly: values in .env are not exported to the process environment.
+    anthropic_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("ANTHROPIC_API_KEY", "AIP_ANTHROPIC_API_KEY"))
 
     # Amazon Bedrock (Mantle client) - only needed when "bedrock" is in `providers`.
     aws_region: str | None = None

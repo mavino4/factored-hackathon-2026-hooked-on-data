@@ -139,3 +139,21 @@ async def test_ollama_uses_the_configured_local_model():
     await collect(gw)
     assert client.calls[0]["model"] == "llama3.2:3b"
     assert "thinking" not in client.calls[0]
+
+
+def test_api_key_from_settings_reaches_the_sdk_client_and_is_not_printed(monkeypatch):
+    import asyncio
+
+    from aiplatform.llm.providers import build_clients
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-123")
+    settings = Settings(providers=["anthropic"])
+    assert "sk-ant-test-123" not in repr(settings)  # SecretStr: never shown in logs/reprs
+
+    async def build():
+        clients = build_clients(settings)
+        key = clients["anthropic"].api_key
+        await clients["anthropic"].close()
+        return key
+
+    assert asyncio.run(build()) == "sk-ant-test-123"

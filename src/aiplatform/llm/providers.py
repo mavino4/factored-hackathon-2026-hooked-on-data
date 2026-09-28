@@ -22,7 +22,11 @@ def build_clients(settings: Settings) -> dict[str, Any]:
     clients: dict[str, Any] = {}
     for name in settings.providers:
         if name == "anthropic":
-            # Credentials: ANTHROPIC_API_KEY or an `ant auth login` profile.
+            # Credentials: ANTHROPIC_API_KEY (env or .env); without it the SDK falls back to
+            # its own resolution (environment, `ant auth login` profile).
+            key = settings.anthropic_api_key
+            if key is not None:
+                common = {**common, "api_key": key.get_secret_value()}
             clients[name] = AsyncAnthropic(http_client=DefaultAioHttpClient(), **common)
         elif name == "bedrock":
             if not settings.aws_region:
