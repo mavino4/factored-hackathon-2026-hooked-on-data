@@ -1,0 +1,17 @@
+# LAN demo: the web UI on http://<this machine's IP>:8000 for other devices on a TRUSTED network.
+#   make lan        (= docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d --build)
+# Dev login: anyone on the network can pick any username, including the demo customers, so
+# only use it on a network you trust. The model runs on the local Ollama, so visitors don't
+# spend Claude API credits, and nginx rate-limits /v1/ per client IP.
+services:
+  app:
+    environment:
+      AIP_AUTH_MODE: dev
+      AIP_PROVIDERS: '["ollama"]'
+      AIP_ADMIN_USERS: "[]"  # dev usernames can be guessed: no admin endpoints on the LAN
+      AIP_USER_REQUESTS_PER_MINUTE: "10"
+      AIP_USER_TOKENS_PER_DAY: "200000"
+
+  lb:
+    # Same mount path as in docker-compose.yml, so this replaces the default config.
+    volumes: [./deploy/nginx.lan.conf:/etc/nginx/conf.d/default.conf:ro]

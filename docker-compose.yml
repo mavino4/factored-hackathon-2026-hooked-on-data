@@ -8,7 +8,8 @@ services:
       POSTGRES_USER: aiplatform
       POSTGRES_PASSWORD: aiplatform
       POSTGRES_DB: aiplatform
-    ports: ["5432:5432"]
+    # localhost only: the default passwords must never be reachable from the LAN.
+    ports: ["127.0.0.1:5432:5432"]
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Creates the separate aiplatform_test database used by `make test-postgres`.

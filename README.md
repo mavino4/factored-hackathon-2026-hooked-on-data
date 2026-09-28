@@ -91,6 +91,16 @@ docker compose up --build -d  # API on http://localhost:8000 (dev auth, Ollama p
 docker compose down           # stop (add -v to also delete the database volume)
 ```
 
+To demo it to other devices on a **trusted** local network (phones, other laptops):
+
+```bash
+make lan   # UI on http://<this machine's IP>:8000; dev login, local Ollama, per-IP rate limit
+```
+
+Anyone on the network can sign in as any username (including the demo customers), so don't
+use it on shared or public Wi-Fi. Postgres only listens on `127.0.0.1`. A plain
+`docker compose up` goes back to the settings in `.env`.
+
 The stack also creates an `aiplatform_test` database for the Postgres storage tests:
 
 ```bash
