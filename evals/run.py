@@ -29,7 +29,7 @@ os.environ.setdefault("AIP_AUTH_MODE", "dev")
 from aiplatform.agent.tools import Tool, ToolContext
 from aiplatform.banking.repository import PostgresBankRepository
 from aiplatform.banking.tools import make_bank_tools
-from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT
+from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT, reply_language
 from aiplatform.config import get_settings
 from aiplatform.llm.gateway import AIGateway
 from aiplatform.llm.models import ROUTES, prices_for
@@ -78,6 +78,13 @@ class Case:
     rubric: str = ""
     user: str = "eval-user"  # session identity for tools (banking cases: eval-es, eval-pt...)
     tags: list[str] = field(default_factory=list)
+    # The UI language sent with the request, as the web UI does. Defaults to the language
+    # the answer is expected in.
+    language: str | None = None
+
+    @property
+    def ui_language(self) -> str | None:
+        return self.language or self.checks.get("language")
 
 
 @dataclass
@@ -242,7 +249,8 @@ def text_of(message) -> str:
 async def run_chat(gateway: AIGateway, case: Case, usage: Usage) -> Answer:
     messages = [*case.history, {"role": "user", "content": case.input}]
     completed = await gateway.complete(ROUTES["chat"], system=CHAT_SYSTEM_PROMPT,
-                                       messages=messages)
+                                       messages=messages,
+                                       system_suffix=reply_language(case.ui_language))
     usage.add(completed.message)
     return Answer(text=text_of(completed.message))
 
@@ -274,7 +282,8 @@ async def run_agent(gateway: AIGateway, case: Case, usage: Usage,
     answer = Answer(text="")
     for _ in range(MAX_AGENT_ITERATIONS):
         completed = await gateway.complete(ROUTES["agent"], system=AGENT_SYSTEM_PROMPT,
-                                           messages=messages, tools=definitions)
+                                           messages=messages, tools=definitions,
+                                           system_suffix=reply_language(case.ui_language))
         message = completed.message
         usage.add(message)
         answer.text = text_of(message)

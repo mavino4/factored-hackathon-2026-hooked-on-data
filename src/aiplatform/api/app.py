@@ -58,11 +58,19 @@ class NewConversation(BaseModel):
     kind: Literal["chat", "agent"] = "chat"
 
 
-class UserMessage(BaseModel):
+Language = Literal["es", "pt", "en"]
+
+
+class Reply(BaseModel):
+    # The language the customer sees in the UI; the assistant replies in it.
+    language: Language | None = None
+
+
+class UserMessage(Reply):
     text: str = Field(min_length=1, max_length=20_000)
 
 
-class Decision(BaseModel):
+class Decision(Reply):
     decision: Literal["approve", "reject"]
 
 
@@ -283,21 +291,23 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
     async def send_message(conversation_id: str, body: UserMessage, request: Request,
                            user_id: Annotated[str, Depends(admit)]) -> StreamingResponse:
         conv = await get_conversation(request, conversation_id, user_id, "chat")
-        return _stream(request.app.state.chat.send(user_id, conv.id, body.text))
+        return _stream(request.app.state.chat.send(user_id, conv.id, body.text, body.language))
 
     @app.post("/v1/conversations/{conversation_id}/regenerate")
     async def regenerate(conversation_id: str, request: Request,
-                         user_id: Annotated[str, Depends(admit)]) -> StreamingResponse:
+                         user_id: Annotated[str, Depends(admit)],
+                         body: Reply | None = None) -> StreamingResponse:
         conv = await get_conversation(request, conversation_id, user_id, "chat")
         if not conv.messages or conv.messages[-1]["role"] != "user":
             raise HTTPException(409, "the last message already has a reply")
-        return _stream(request.app.state.chat.regenerate(user_id, conv.id))
+        return _stream(request.app.state.chat.regenerate(
+            user_id, conv.id, body.language if body else None))
 
     @app.post("/v1/conversations/{conversation_id}/agent-runs")
     async def run_agent(conversation_id: str, body: UserMessage, request: Request,
                         user_id: Annotated[str, Depends(admit)]) -> StreamingResponse:
         conv = await get_conversation(request, conversation_id, user_id, "agent")
-        return _stream(request.app.state.agent.run(user_id, conv.id, body.text))
+        return _stream(request.app.state.agent.run(user_id, conv.id, body.text, body.language))
 
     @app.post("/v1/conversations/{conversation_id}/actions/{action_id}")
     async def decide_action(conversation_id: str, action_id: str, body: Decision,
@@ -308,7 +318,8 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         if not any(a.id == action_id for a in pending):
             raise HTTPException(404, "no pending action with this id")
         return _stream(request.app.state.agent.decide(
-            user_id, conv.id, action_id, approve=body.decision == "approve"))
+            user_id, conv.id, action_id, approve=body.decision == "approve",
+            language=body.language))
 
     # The web UI: static files at "/". Mounted last so API routes take precedence.
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

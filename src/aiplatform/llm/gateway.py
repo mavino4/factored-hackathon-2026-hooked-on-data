@@ -55,7 +55,8 @@ class StreamInterrupted(GatewayError):
 
 
 def build_params(route: Route, provider: str, *, system: str, messages: list[dict],
-                 tools: list[dict] | None, model: str | None = None) -> dict[str, Any]:
+                 tools: list[dict] | None, model: str | None = None,
+                 system_suffix: str | None = None) -> dict[str, Any]:
     params: dict[str, Any] = {
         "model": model or route.model.id_for(provider),
         "max_tokens": route.max_tokens,
@@ -64,6 +65,8 @@ def build_params(route: Route, provider: str, *, system: str, messages: list[dic
         # Breakpoint 2: the end of the conversation, so the next turn reads it from cache.
         "messages": _with_tail_breakpoint(messages),
     }
+    if system_suffix:  # per-request text (e.g. reply language), after the cached prefix
+        params["system"].append({"type": "text", "text": system_suffix})
     if tools:
         # Deterministic order: any change in the tool list invalidates the whole cache.
         params["tools"] = sorted(tools, key=lambda t: t["name"])
@@ -123,14 +126,16 @@ class AIGateway:
 
     async def stream(self, route: Route, *, system: str, messages: list[dict],
                      tools: list[dict] | None = None,
-                     conversation_id: str | None = None) -> AsyncIterator[TextDelta | Completed]:
+                     conversation_id: str | None = None,
+                     system_suffix: str | None = None) -> AsyncIterator[TextDelta | Completed]:
         """Stream one model turn. Yields text deltas, then exactly one ``Completed``."""
         last_error: BaseException | None = None
         for provider in self._provider_order(conversation_id):
             client = self._clients[provider]
             breaker = self._breakers[provider]
             params = build_params(route, provider, system=system, messages=messages, tools=tools,
-                                  model=self._model_overrides.get(provider))
+                                  model=self._model_overrides.get(provider),
+                                  system_suffix=system_suffix)
             for attempt in range(self._settings.max_attempts_per_provider):
                 if not breaker.acquire():
                     break

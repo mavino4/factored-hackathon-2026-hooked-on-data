@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 
 from aiplatform.chat.inflight import InFlight
-from aiplatform.chat.prompts import CHAT_SYSTEM_PROMPT
+from aiplatform.chat.prompts import CHAT_SYSTEM_PROMPT, reply_language
 from aiplatform.chat.repository import Conversation, ConversationRepository
 from aiplatform.llm.gateway import AIGateway, Completed, TextDelta
 from aiplatform.llm.models import ROUTES
@@ -39,30 +39,32 @@ class ChatService:
         self._usage = usage
         self._inflight = inflight
 
-    async def send(self, user_id: str, conversation_id: str,
-                   text: str) -> AsyncIterator[TextDelta | Completed]:
+    async def send(self, user_id: str, conversation_id: str, text: str,
+                   language: str | None = None) -> AsyncIterator[TextDelta | Completed]:
         conv = await self._repo.get(conversation_id, user_id)
         with self._inflight.hold(conv.id):
             check_history_size(conv.messages)
             await self._repo.append(conv, {"role": "user", "content": text})
-            async for event in self._reply(user_id, conv):
+            async for event in self._reply(user_id, conv, language):
                 yield event
 
-    async def regenerate(self, user_id: str,
-                         conversation_id: str) -> AsyncIterator[TextDelta | Completed]:
+    async def regenerate(self, user_id: str, conversation_id: str,
+                         language: str | None = None) -> AsyncIterator[TextDelta | Completed]:
         """Answer the last user message again (e.g. after an interrupted stream),
         without adding a duplicate user message."""
         conv = await self._repo.get(conversation_id, user_id)
         with self._inflight.hold(conv.id):
             if not conv.messages or conv.messages[-1]["role"] != "user":
                 raise NothingToRegenerate()
-            async for event in self._reply(user_id, conv):
+            async for event in self._reply(user_id, conv, language):
                 yield event
 
-    async def _reply(self, user_id: str, conv: Conversation) -> AsyncIterator[TextDelta | Completed]:
+    async def _reply(self, user_id: str, conv: Conversation,
+                     language: str | None) -> AsyncIterator[TextDelta | Completed]:
         route = ROUTES["chat"]
         async for event in self._gateway.stream(route, system=CHAT_SYSTEM_PROMPT,
-                                                messages=conv.messages, conversation_id=conv.id):
+                                                messages=conv.messages, conversation_id=conv.id,
+                                                system_suffix=reply_language(language)):
             if isinstance(event, Completed):
                 message = event.message
                 await self._usage.record(UsageEvent.from_message(

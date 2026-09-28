@@ -136,7 +136,16 @@ make test-postgres            # same storage tests against real Postgres (see ab
 ## Banking assistant (Spanish / Portuguese)
 
 The agent answers **balance questions about the signed-in customer's own products**
-(accounts, cards, loans), in the customer's language (Spanish or Portuguese).
+(accounts, cards, loans), in the language the customer sees on screen.
+
+- **UI:** every session opens a new query ("¡Hola, {nombre}! Soy BankBot…") with
+  quick-action buttons. A selector at the top right switches the language (es/pt/en,
+  remembered per browser). While BankBot works the customer sees a "Consultando…"
+  animation; tool names, arguments and results are never sent to the browser.
+- **Reply language = UI language:** every message carries `"language": "es"|"pt"|"en"`
+  (the UI's current language). The server adds it as a *second* system block after the
+  cached prompt ("Reply language: …"), so the prompt cache is unaffected. Without it,
+  the model falls back to the customer's language.
 
 - **Data:** an external core-banking database loaded from the Datathon `customers` and
   `products` tables with `make bank-db` (150k customers / 400k products). Only
@@ -181,7 +190,7 @@ transcripts plus the figures in the bank DB (`make banking-cases`). They cover b
 available credit, limits, loans, days past due, the transcripts' follow-ups, out-of-scope
 requests and security (other people's data, PIN, prompt injection, unlinked users).
 Amounts are matched in any number format (`1.234,56` / `1,234.56`), and the reply language
-is checked.
+is checked. Each case sends its expected language as the UI language, as the web UI does.
 
 ```bash
 make compare-models   # llama3.2:3b vs qwen2.5:7b on Ollama, by topic and language

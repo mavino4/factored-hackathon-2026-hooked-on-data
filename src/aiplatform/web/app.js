@@ -469,7 +469,8 @@ async function runStream(path, body) {
   let failed = false;
   showStatus(t("status_thinking"));
   try {
-    await streamEvents(path, body, (name, data) => {
+    // The assistant replies in the language the customer is looking at.
+    await streamEvents(path, { ...body, language: LANG }, (name, data) => {
       switch (name) {
         case "delta":
           hideStatus();

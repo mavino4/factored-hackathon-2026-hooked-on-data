@@ -30,7 +30,7 @@ BANK_URL = os.environ.setdefault(
     "AIP_BANK_DATABASE_URL", "postgresql+asyncpg://bank_reader:bank_reader@localhost:5432/bank")
 
 from aiplatform.banking.repository import PostgresBankRepository
-from evals.run import mentions_amount
+from evals.run import detect_language, mentions_amount
 
 API = "http://localhost:8765"
 ISSUER_PORT = 9123  # not 9000: that port is often taken (e.g. Jupyter)
@@ -117,7 +117,10 @@ def assert_nothing_hidden_is_shown(page: Page) -> None:
 def ask_balance(page: Page, lang: str, user: str, truth: dict[str, dict]) -> None:
     """Ask with the quick-action button; the answer must be the customer's own figure."""
     ui = UI[lang]
-    page.get_by_role("button", name=ui["quick"]).click()
+    with page.expect_request(lambda r: r.method == "POST" and "/agent-runs" in r.url) as sent:
+        page.get_by_role("button", name=ui["quick"]).click()
+    sent_language = sent.value.post_data_json.get("language")
+    assert sent_language == lang, f"request sent language {sent_language!r}, UI shows {lang!r}"
     status = page.locator(".status")
     expect(status).to_be_visible(timeout=10_000)
     print(f"  progress shown: {status.inner_text()!r}")
@@ -126,7 +129,13 @@ def ask_balance(page: Page, lang: str, user: str, truth: dict[str, dict]) -> Non
     expect(status).to_have_count(0)
     assert_nothing_hidden_is_shown(page)
     text = page.locator("#messages").inner_text()
-    print(f"  [{user}] reply: {page.locator('.msg.assistant .bubble').last.inner_text()[:200]!r}")
+    reply = page.locator(".msg.assistant .bubble").last.inner_text()
+    print(f"  [{user}] reply: {reply[:200]!r}")
+    replied_in = detect_language(reply)
+    if replied_in == lang:
+        print(f"  OK: replied in the UI language ({lang})")
+    else:
+        print(f"  WARN: replied in {replied_in or 'unknown'}, UI is {lang} (model quality)")
     others = [u for u in truth if u != user and mentions_amount(text, truth[u]["balance"])]
     assert not others, f"{user} sees figures of {others}"
     if mentions_amount(text, truth[user]["balance"]):

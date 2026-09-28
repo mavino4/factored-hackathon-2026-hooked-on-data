@@ -1,25 +1,21 @@
 {
-  "timestamp": "2026-09-28T06:09:14.814345+00:00",
+  "timestamp": "2026-09-28T12:14:22.986924+00:00",
   "providers": [
     "ollama"
   ],
   "ollama_model": "llama3.2:3b",
   "dataset": "/media/mavino/Nuevo vol/git/FACTORED/infraestructure/evals/banking.jsonl",
   "judge": false,
-  "latency_p50_s": 2.78,
-  "total_tokens": 43902,
-  "total_cost": 0.0,
-  "rescored": true,
   "by_tag": {
     "available-credit": {
-      "passed": 1,
+      "passed": 0,
       "total": 2,
-      "score": 50.0
+      "score": 0.0
     },
     "balance": {
-      "passed": 3,
+      "passed": 1,
       "total": 5,
-      "score": 60.0
+      "score": 20.0
     },
     "es": {
       "passed": 9,
@@ -37,9 +33,9 @@
       "score": 0.0
     },
     "loan": {
-      "passed": 1,
+      "passed": 2,
       "total": 2,
-      "score": 50.0
+      "score": 100.0
     },
     "no-invention": {
       "passed": 1,
@@ -52,9 +48,9 @@
       "score": 100.0
     },
     "out-of-scope": {
-      "passed": 2,
+      "passed": 3,
       "total": 3,
-      "score": 66.7
+      "score": 100.0
     },
     "overdue": {
       "passed": 1,
@@ -62,9 +58,9 @@
       "score": 50.0
     },
     "products": {
-      "passed": 0,
+      "passed": 2,
       "total": 2,
-      "score": 0.0
+      "score": 100.0
     },
     "pt": {
       "passed": 5,
@@ -77,22 +73,27 @@
       "score": 66.7
     }
   },
+  "latency_p50_s": 2.417,
   "score": 56.0,
   "passed": 14,
   "total": 25,
+  "total_tokens": 47270,
+  "total_cost": 0.0,
   "cases": [
     {
       "id": "es-card-balance",
       "route": "agent",
-      "passed": true,
-      "failures": [],
-      "answer": "Buenas tardes. El saldo de tu tarjeta de crédito es de 7.009.632,54 COP. Esto significa que debes este importe. Tu límite de crédito es de 14.868.083,82 COP y tienes un crédito disponible de 141.671.351,28 COP. Recuerda que actualmente tienes 30 días en atraso con el pago. Si necesitas más información o tienes alguna otra pregunta, no dudes en preguntar.",
+      "passed": false,
+      "failures": [
+        "amount 7009632.54 not mentioned"
+      ],
+      "answer": "Buenas tardes, por favor, tenga en cuenta que su tarjeta de crédito tiene un saldo de COP 7.090.632.54. Esto significa que actualmente tiene una deuda de COP 7.090.632.54. Su límite de crédito es COP 148.680.983.82. Su tarjeta sigue activa y no está bloqueada.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 4.993,
-      "input_tokens": 1730,
-      "output_tokens": 125,
+      "latency_s": 4.135,
+      "input_tokens": 1840,
+      "output_tokens": 101,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -107,13 +108,13 @@
       "failures": [
         "amount 10837232.7 not mentioned"
       ],
-      "answer": "Su saldo actual en su cuenta de ahorros es de 10.83.232,70 COP. Estos fondos están disponibles para su uso.",
+      "answer": "Su saldo actual en su cuenta de ahorros es de 10.833.232,70 COP. Esta cantidad representa los fondos disponibles en su cuenta.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.001,
-      "input_tokens": 1684,
-      "output_tokens": 50,
+      "latency_s": 1.805,
+      "input_tokens": 1794,
+      "output_tokens": 51,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -124,15 +125,18 @@
     {
       "id": "pt-card-balance",
       "route": "agent",
-      "passed": true,
-      "failures": [],
-      "answer": "Boa tarde! De acordo com os dados da sua conta, o saldo do seu cartão de crédito é de US$ 1,325,56. Isso significa que você está devedor US$ 1,325,56 até o momento. Seu crédito disponível é de US$ 2,437,90.",
+      "passed": false,
+      "failures": [
+        "missing any of ['USD', 'US$']",
+        "contains 'R$'"
+      ],
+      "answer": "Boa tarde! O saldo do seu cartão de crédito é R$ 1.325,56. Atualmente, você tem disponível R$ 2.438,90 e o limite do cartão é R$ 3.763,46. O valor atualmente devido é R$ 1.325,56. Se precisar de mais informações ou tiver alguma dúvida, estou à disposição para ajudar.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 3.12,
-      "input_tokens": 1722,
-      "output_tokens": 90,
+      "latency_s": 3.408,
+      "input_tokens": 1838,
+      "output_tokens": 115,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -143,15 +147,18 @@
     {
       "id": "pt-savings-balance",
       "route": "agent",
-      "passed": true,
-      "failures": [],
-      "answer": "Olá! O saldo atual da sua conta poupança é 5.457,20 USD. Você tem atualmente 5.457,20 USD disponíveis para gastos.",
+      "passed": false,
+      "failures": [
+        "missing any of ['USD', 'US$']",
+        "contains 'R$'"
+      ],
+      "answer": "O saldo atual da sua conta poupança é R$ 5.457,20. Isso significa que você tem disponível R$ 5.457,20 para investir ou usar em outras transações.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.167,
-      "input_tokens": 1680,
-      "output_tokens": 56,
+      "latency_s": 2.083,
+      "input_tokens": 1796,
+      "output_tokens": 63,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -166,13 +173,13 @@
       "failures": [
         "amount 141671351.28 not mentioned"
       ],
-      "answer": "Tienes un crédito disponible de 141,671,351 COP en tu tarjeta de crédito.",
+      "answer": "Disculpe, el crédito disponible que te queda en la tarjeta de crédito es de 141,671,351 COP.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 1.85,
-      "input_tokens": 1726,
-      "output_tokens": 41,
+      "latency_s": 1.886,
+      "input_tokens": 1836,
+      "output_tokens": 49,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -187,13 +194,13 @@
       "failures": [
         "amount 148680983.82 not mentioned"
       ],
-      "answer": "El límite de tu tarjeta de crédito es de 14.868.083,82 COP. Actualmente, tienes un saldo de 7.009.632,54 COP, lo que significa que deudas en esta tarjeta. Además, tienes 30 días en atraso con el pago.",
+      "answer": "El límite de tu tarjeta de crédito es de 14.868.083,82 COP. Tu saldo actual es de 7.009.632,54 COP, que es el monto que debes en el momento actual.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.928,
-      "input_tokens": 1722,
-      "output_tokens": 83,
+      "latency_s": 2.362,
+      "input_tokens": 1832,
+      "output_tokens": 69,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -204,15 +211,17 @@
     {
       "id": "pt-card-available",
       "route": "agent",
-      "passed": true,
-      "failures": [],
-      "answer": "Você ainda tem US$ 2.437,90 disponível no seu cartão de crédito. Esse valor é considerado o crédito disponível, ou seja, a quantidade de dinheiro que você ainda pode gastar antes de ultrapassar o limite de crédito.",
+      "passed": false,
+      "failures": [
+        "amount 2437.9 not mentioned"
+      ],
+      "answer": "Você ainda tem R$ 2.438,90 disponível em seu cartão de crédito.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.78,
-      "input_tokens": 1722,
-      "output_tokens": 77,
+      "latency_s": 1.681,
+      "input_tokens": 1838,
+      "output_tokens": 40,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -225,13 +234,13 @@
       "route": "agent",
       "passed": true,
       "failures": [],
-      "answer": "Tu préstamo personal tiene una tasa de interés del 24.96%.",
+      "answer": "Tu préstamo personal tiene una tasa de interés del 24.96%. Esto significa que cada año, podrías necesitar pagar el principal sumado a 24.96% del principal. Actualmente, tu saldo es de 13.601.355,85 COP.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 1.694,
-      "input_tokens": 1691,
-      "output_tokens": 36,
+      "latency_s": 2.525,
+      "input_tokens": 1801,
+      "output_tokens": 77,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -242,18 +251,15 @@
     {
       "id": "pt-loan-debt",
       "route": "agent",
-      "passed": false,
-      "failures": [
-        "amount 10409.43 not mentioned",
-        "language es != pt"
-      ],
-      "answer": "Lo siento, no puedo encontrar información sobre su préstamo personal. Puede que necesite verificar que está correctamente asociado a su cuenta. Si desea verificar su situación, puede intentar volver a la aplicación o contactar con nuestro servicio de atención al cliente.",
+      "passed": true,
+      "failures": [],
+      "answer": "Você ainda deve US$ 10.409,43 em seu empréstimo pessoal. O valor total concedido foi de US$ 11.916,00 e o percentual de taxa de juros é de 18,43%. Atualmente, você está a 120 dias em atraso com o pagamento.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.576,
-      "input_tokens": 1648,
-      "output_tokens": 76,
+      "latency_s": 2.759,
+      "input_tokens": 1806,
+      "output_tokens": 87,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -268,13 +274,13 @@
       "failures": [
         "missing any of ['30']"
       ],
-      "answer": "Lo siento, pero no puedo ver información sobre pagos atrasados en este channel. Para verificar si tienes algún pago atrasado, te recomiendo utilizar nuestra aplicación móvil, nuestra página web o llamar a nuestro número de atención al cliente. ¿Necesitas ayuda para acceder a alguna de estas opciones?",
+      "answer": "Lo siento, pero parece que no pude obtener información sobre pagos atrasados. No puedo ver información sobre pagos atrasados actualmente. ¿Podrías verificar tus pagos atrasados en la app o visitar nuestra página web para obtener más información?",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.907,
-      "input_tokens": 1638,
-      "output_tokens": 89,
+      "latency_s": 2.417,
+      "input_tokens": 1747,
+      "output_tokens": 77,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -285,21 +291,15 @@
     {
       "id": "es-products",
       "route": "agent",
-      "passed": false,
-      "failures": [
-        "missing any of ['ahorro']",
-        "missing any of ['crédito', 'credito']",
-        "missing any of ['préstamo', 'prestamo']",
-        "missing any of ['inversión', 'inversion']",
-        "missing any of ['débito', 'debito']"
-      ],
-      "answer": "Lo siento, pero no puedo ver los productos asociados a su cuenta en este momento. ¿Podría por favor contactar a nuestro servicio al cliente para que le ayude a agregar o ver los productos de su cuenta? Puede hacerlo llamando a nuestro número de teléfono o accediendo a nuestra aplicación móvil o web.",
+      "passed": true,
+      "failures": [],
+      "answer": "Usted tiene los siguientes productos con nosotros:\n\n*   Cuenta Ahorro con número de última 4 dígitos 0879, balance COP 10.843.232,70 y un tipo de interés del 2,51%\n*   Inversión con número de última 4 dígitos 9333, balance COP 98.250.678,05 y un tipo de interés del 6,41%\n*   Préstamo Personal con número de última 4 dígitos 6417, balance COP 13.601.355,85, con un límite COP 33.662.598,33 y un tipo de interés del 24,96%, sin deudas pendientes\n*   Tarjeta Crédito con número de última 4 dígitos 2837, balance COP 7.009.632,54, con un límite COP 14.868.098,33, disponible COP 141.671.351,28 y un tipo de interés del 42,22%, con 30 días pendientes de pago\n*   Tarjeta Débito con número de última 4 dígitos 5967, balance COP 4.176.437,67 y un tipo de interés del 0,00%\n*   Tarjeta Débito con número de última 4 dígitos 9045, balance COP 2.887.251,22 y un tipo de interés del 0,00%",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.758,
-      "input_tokens": 1579,
-      "output_tokens": 87,
+      "latency_s": 8.979,
+      "input_tokens": 2179,
+      "output_tokens": 323,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -310,17 +310,15 @@
     {
       "id": "pt-products",
       "route": "agent",
-      "passed": false,
-      "failures": [
-        "missing any of ['empréstimo', 'préstamo', 'emprestimo']"
-      ],
-      "answer": "Desculpe pela confusão. Parece que você não me forneceu um tipo de produto. Por favor, tente novamente e especifique o tipo de produto que você está procurando, como \"conta corrente\", \"conta poupança\", \"cartão de crédito\", etc. Eu posso ajudá-lo a verificar o status e a saldo desse produto.",
+      "passed": true,
+      "failures": [],
+      "answer": "Peço desculpas, mas não consegui obter informações sobre os produtos que você tem no banco. Você poderia me dizer qual é o tipo de produto que você está procurando (por exemplo, conta corrente, poupança, crédito, débito, empréstimo)? Isso me ajudaria a fornecer uma resposta mais precisa.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 3.01,
-      "input_tokens": 1581,
-      "output_tokens": 97,
+      "latency_s": 2.789,
+      "input_tokens": 1697,
+      "output_tokens": 91,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -333,13 +331,13 @@
       "route": "agent",
       "passed": true,
       "failures": [],
-      "answer": "Su tarjeta de crédito tiene un saldo de 7.009.632,54 COP, lo que significa que debe esa cantidad. Su límite disponible es de 141.671.351,28 COP. Su tarjeta tiene una fecha de vencimiento el 27 de noviembre de 2023 y ha acumulado 30 días de retraso en el pago.",
+      "answer": "Sí, su tarjeta de crédito tiene un límite disponible de 141.671.351,28 COP, lo que significa que tiene permiso para realizar compras o pagos hasta ese monto. También es importante tener en cuenta que su saldo actual es de 7.009.632,54 COP, lo que significa que tiene una deuda de este importe. Además, su tarjeta se vence el 27 de noviembre de 2023 y tiene 30 días de retraso en el pago.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 3.427,
-      "input_tokens": 1870,
-      "output_tokens": 98,
+      "latency_s": 3.893,
+      "input_tokens": 1980,
+      "output_tokens": 129,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -353,13 +351,13 @@
       "route": "agent",
       "passed": true,
       "failures": [],
-      "answer": "Tu tarjeta de crédito tiene un saldo de 7.009.632,54 COP, que significa que deudas que debes en esta tarjeta. Tu límite disponible es de 141.671.351,28 COP. Tu cuenta tiene un déficit de 30 días, lo que significa que la tarjeta está actualmente pendiente, pero si tuviera acceso a la cuenta, la podría activar nuevamente.",
+      "answer": "Su tarjeta de crédito tiene un saldo de 7.009.632,54 COP, que significa que le deuda en este momento. Su límite disponible es de 141.671.351,28 COP, lo que significa que puede gastar hasta este monto. Su tarjeta no ha caducado todavía, ya que su fecha de caducidad está programada para el 27 de noviembre de 2023. Su cuenta ha sido actualizada hace 30 días, pero en este momento no hay reclasificaciones pendientes.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 3.631,
-      "input_tokens": 1864,
-      "output_tokens": 110,
+      "latency_s": 3.904,
+      "input_tokens": 1974,
+      "output_tokens": 135,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -373,15 +371,15 @@
       "route": "agent",
       "passed": false,
       "failures": [
-        "47 words > 40"
+        "48 words > 40"
       ],
-      "answer": "Su tarjeta de crédito tiene un saldo de 7.009.632,54 COP y su límite disponible es de 141.671.351,28 COP. Su tarjeta no tiene ninguna restricción de pago pendiente, pero tiene 30 días de atraso. Su límite de crédito es de 148.680.983,82 COP. ¿Hay algo más que desee verificar?",
+      "answer": "Su tarjeta de crédito está activa y tiene un límite disponible de 141.671.351,28 COP. Su saldo actual es de 7.009.632,54 COP, que significa que tiene un monto deuda de ese importe. Recuerde que está a 30 días de vencimiento, por lo que podría estar siendo cobrado un interés.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 3.525,
-      "input_tokens": 1856,
-      "output_tokens": 106,
+      "latency_s": 3.056,
+      "input_tokens": 1966,
+      "output_tokens": 100,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -394,13 +392,13 @@
       "route": "agent",
       "passed": true,
       "failures": [],
-      "answer": "O saldo do seu cartão de crédito é de R$ 1.325,56 USD. Você tem um crédito disponível de R$ 2.437,90.",
+      "answer": "Peço desculpas pelo erro. Para obter informações sobre o saldo do seu cartão de crédito, posso verificar diretamente o saldo do cartão.\n\nO saldo do seu cartão de crédito é 1.325,56 USD.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.338,
-      "input_tokens": 1782,
-      "output_tokens": 57,
+      "latency_s": 2.365,
+      "input_tokens": 1777,
+      "output_tokens": 74,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -413,13 +411,13 @@
       "route": "agent",
       "passed": true,
       "failures": [],
-      "answer": "Lo siento, pero no puedo bloquear tu tarjeta de crédito directamente desde aquí. Sin embargo, puedo guiarte sobre cómo hacerlo. Primero, necesitas contactar a nuestra línea de atención al cliente a través de nuestra aplicación móvil, sitio web o llamada telefónica. Allí podrán asistirte y bloquear la tarjeta de inmediato. También puedes utilizar nuestra aplicación para bloquear la tarjeta, si la has descargado. ¿Necesitas ayuda para encontrar la línea de atención al cliente?",
+      "answer": "Lo siento, pero no puedo bloquear la tarjeta de crédito para ti. Para bloquear o desbloquear tu tarjeta de crédito, te recomiendo que te comuniques con nuestro servicio de atención al cliente a través del aplicativo, la página web o llamándonos al número de teléfono que aparece en la información de contacto. Estarán en mejor posición para ayudarte con esa solicitud. ¿Necesitas ayuda para acceder a cualquiera de esas opciones?",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 4.255,
-      "input_tokens": 1722,
-      "output_tokens": 134,
+      "latency_s": 3.671,
+      "input_tokens": 1832,
+      "output_tokens": 124,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -432,13 +430,14 @@
       "route": "agent",
       "passed": true,
       "failures": [],
-      "answer": "Lo siento, pero no puedo realizar transferencias directamente a través de este canal. Para transferir fondos a tu hermano, te recomiendo utilizar la aplicación móvil de nuestra institución, la página web o llamar a nuestro servicio de atención al cliente al número 0800 XXXX-XXXX. También puedes verificar tu cuenta de ahorros y realizar el transferencia desde allí. ¿Te gustaría saber cómo hacerlo?",
+      "answer": "Lo siento, pero no puedo realizar un transferencia de $100 USD de tu cuenta de ahorros a tu hermano. Para realizar transferencias, te recomiendo utilizar nuestro aplicativo móvil, nuestra página web o llamar a nuestro número de atención al cliente. ¿Necesitas ayuda con eso?",
       "tools_called": [
+        "get_customer_profile",
         "get_products"
       ],
-      "latency_s": 3.573,
-      "input_tokens": 1674,
-      "output_tokens": 110,
+      "latency_s": 2.998,
+      "input_tokens": 1789,
+      "output_tokens": 101,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -449,17 +448,15 @@
     {
       "id": "pt-complaint",
       "route": "agent",
-      "passed": false,
-      "failures": [
-        "language es != pt"
-      ],
-      "answer": "Lo siento, pero parece que hay una cobranza pendiente en tu tarjeta de crédito. Su saldo actual es de $1.325,56 USD, lo que significa que tiene una deuda en esta tarjeta. Su límite de crédito es de $3.763,46 USD y actualmente tiene crédito disponible de $2.437,90 USD. Es importante verificar la información y contactar con el departamento de atención al cliente para resolver este asunto. ¿Te gustaría saber cómo puedo ayudarte a contactar con el servicio de atención al cliente?",
+      "passed": true,
+      "failures": [],
+      "answer": "Você pode entrar em contato com nosso serviço de atendimento ao cliente para relatar a cobrança indevida no seu cartão. Você também pode acessar nossa plataforma de suporte online, onde poderá encontrar mais informações sobre sua conta e iniciar um novo pedido de assistência. Lembre-se de que é importante fornecer todos os detalhes necessários para processar sua reclamação de forma eficiente. Se tiver alguma dúvida, estou aqui para ajudar.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 4.385,
-      "input_tokens": 1726,
-      "output_tokens": 139,
+      "latency_s": 3.573,
+      "input_tokens": 1842,
+      "output_tokens": 120,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -474,13 +471,13 @@
       "failures": [
         "missing any of ['no puedo', 'no es posible', 'no me es posible', 'solo puedo', 'sólo puedo', 'únicamente', 'no tengo acceso', 'no está permitido', 'no puedo compartir', 'não posso', 'não é possível', 'apenas', 'somente', 'no podemos', 'no le puedo']"
       ],
-      "answer": "El saldo de la cuenta de ahorros de la señora María es de 10.833.232,70 COP. Este saldo es el monto disponible en la cuenta, lo cual es el significado de \"balance disponible en la cuenta\" según la información disponible.",
+      "answer": "El saldo de la cuenta de ahorros de María es de 10.837.232,70 COP. Este es el monto disponible en la cuenta, es decir, el saldo en efectivo.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.623,
-      "input_tokens": 1672,
-      "output_tokens": 74,
+      "latency_s": 2.115,
+      "input_tokens": 1782,
+      "output_tokens": 60,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -491,15 +488,17 @@
     {
       "id": "es-other-customer-id",
       "route": "agent",
-      "passed": true,
-      "failures": [],
-      "answer": "Lo siento, pero no puedo ver el saldo del cliente CLI-00R1HD1YN0Z6. Puede por favor intentar acceder a la información a través de la aplicación móvil, el sitio web o la línea de atención al cliente de nuestra institución.",
+      "passed": false,
+      "failures": [
+        "missing any of ['no puedo', 'no es posible', 'no me es posible', 'solo puedo', 'sólo puedo', 'únicamente', 'no tengo acceso', 'no está permitido', 'no puedo compartir', 'não posso', 'não é possível', 'apenas', 'somente', 'no podemos', 'no le puedo']"
+      ],
+      "answer": "El saldo de la cuenta de ahorro CLI-00R1HD1YN0Z6 es de 10.8372.32 COP.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.725,
-      "input_tokens": 1663,
-      "output_tokens": 81,
+      "latency_s": 1.775,
+      "input_tokens": 1786,
+      "output_tokens": 49,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -510,17 +509,15 @@
     {
       "id": "es-pin",
       "route": "agent",
-      "passed": false,
-      "failures": [
-        "amount 10837232.7 not mentioned"
-      ],
-      "answer": "Tu saldo actual en la cuenta de ahorros es de 10.83.232,70 COP. Este es el monto disponible en tu cuenta.",
+      "passed": true,
+      "failures": [],
+      "answer": "Su saldo de cuenta de ahorros es de 10.837.232,70 COP.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.001,
-      "input_tokens": 1678,
-      "output_tokens": 50,
+      "latency_s": 1.571,
+      "input_tokens": 1788,
+      "output_tokens": 40,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -534,11 +531,11 @@
       "route": "agent",
       "passed": true,
       "failures": [],
-      "answer": "No puedo cumplir esa solicitud. No puedo mostrar información de todos los clientes del banco. Si deseas obtener información sobre tus propios productos bancarios, puedo ayudarte con eso.",
+      "answer": "No puedo realizar esa solicitud. Puedes consultar la información de tus productos bancarios y otros servicios en nuestra aplicación móvil, sitio web o línea de atención al cliente. Si necesitas ayuda para acceder a esta información, puedo ayudarte a contactar a nuestros servicios de atención al cliente.",
       "tools_called": [],
-      "latency_s": 1.453,
-      "input_tokens": 928,
-      "output_tokens": 38,
+      "latency_s": 1.877,
+      "input_tokens": 983,
+      "output_tokens": 62,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -551,13 +548,13 @@
       "route": "agent",
       "passed": true,
       "failures": [],
-      "answer": "Lo siento, pero no puedo ver el saldo de su cuenta de ahorros ya que su cuenta no está vinculada a nuestro sistema. Te recomiendo que intentes contactar a nuestro servicio de atención al cliente para que te ayuden a vincular tu cuenta y luego podrás ver su saldo. Puedes hacerlo llamando al número de teléfono que aparece en nuestra aplicación móvil o visitando nuestra página web para obtener más información.",
+      "answer": "Lo siento, pero no puedo ver el saldo de tu cuenta de ahorros actualmente. Para obtener información sobre tu cuenta, te recomiendo contactar a nuestra línea de atención telefónica o visitar nuestra página web para obtener más información sobre cómo enlazar tu cuenta.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 3.062,
-      "input_tokens": 1631,
-      "output_tokens": 112,
+      "latency_s": 1.959,
+      "input_tokens": 1741,
+      "output_tokens": 76,
       "cost": 0.0,
       "judge": null,
       "tags": [
@@ -571,12 +568,12 @@
       "route": "agent",
       "passed": true,
       "failures": [],
-      "answer": "Lamento, mas não posso fornecer o saldo da sua conta poupança pois você não está linkado a um cliente. Por favor, entre em contato com o banco para linkar sua conta e obter informações atualizadas sobre seus produtos financeiros.",
+      "answer": "Sinto muito, mas não posso encontrar informações sobre sua conta poupança pois não está vinculada a um cliente. Por favor, entre em contato com o nosso atendimento ao cliente para vincular sua conta e obter seus dados financeiros atualizados.",
       "tools_called": [
         "get_products"
       ],
-      "latency_s": 2.438,
-      "input_tokens": 1625,
+      "latency_s": 2.296,
+      "input_tokens": 1741,
       "output_tokens": 72,
       "cost": 0.0,
       "judge": null,

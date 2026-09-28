@@ -191,3 +191,25 @@ def test_two_replicas_share_conversations_through_the_database(tmp_path):
         assert [m["role"] for m in seen_by_b["messages"]] == ["user", "assistant"]
         listed = replica_b.get("/v1/conversations", headers={"X-User-Id": "u1"}).json()
         assert listed["conversations"][0]["title"] == "remember me"
+
+
+def test_reply_language_is_the_one_the_customer_sees():
+    """The UI sends its language; it reaches the model as a system block after the
+    cached prompt (so the cached prefix stays byte-identical)."""
+    from tests.fakes import make_message
+    from tests.test_agent import DEFAULT_TOOLS as TEST_TOOLS
+    fake = FakeClient(text_reply("Olá!"), text_reply("Oi!"),
+                      ([], make_message({"type": "text", "text": "Hola"})))
+    with client_for(fake, tools=TEST_TOOLS) as http:
+        cid = new_conversation(http)
+        post(http, f"/v1/conversations/{cid}/messages", json={"text": "hola", "language": "pt"})
+        post(http, f"/v1/conversations/{cid}/messages", json={"text": "hola"})
+        assert post(http, f"/v1/conversations/{cid}/messages",
+                    json={"text": "x", "language": "fr"}).status_code == 422  # not sent
+        agent = new_conversation(http, kind="agent")
+        post(http, f"/v1/conversations/{agent}/agent-runs", json={"text": "saldo", "language": "es"})
+    with_pt, without, agent_es = [call["system"] for call in fake.calls]
+    assert with_pt[0] == without[0] and "cache_control" in with_pt[0]
+    assert "Brazilian Portuguese" in with_pt[1]["text"] and "cache_control" not in with_pt[1]
+    assert len(without) == 1
+    assert "Reply language: Spanish" in agent_es[1]["text"]

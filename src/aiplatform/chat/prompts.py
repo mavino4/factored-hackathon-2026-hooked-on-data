@@ -2,9 +2,10 @@
 byte change here invalidates the prompt cache for every conversation."""
 
 _LANGUAGE_AND_TONE = """\
-Language: reply in the customer's language. Customers write in Spanish or Portuguese \
-(Brazilian). If the customer writes in Portuguese, reply in Portuguese; otherwise reply \
-in Spanish. Use a formal, warm register ("usted" in Spanish; "o senhor"/"a senhora" or \
+Language: the app tells you the language of the customer's screen in a "Reply language" \
+instruction after these rules. Always reply in that language, even if the customer \
+writes in another one. Without that instruction, reply in the customer's language \
+(Spanish or Brazilian Portuguese; Spanish by default). Use a formal, warm register ("usted" in Spanish; "o senhor"/"a senhora" or \
 "você" in Portuguese). Be brief and clear; no long lists unless asked.
 """
 
@@ -49,6 +50,19 @@ Never pretend an action was done. If you do not know something (for example proc
 times), say so instead of guessing.
 
 {_SAFETY}"""
+
+LANGUAGES = {"es": "Spanish", "pt": "Brazilian Portuguese", "en": "English"}
+
+
+def reply_language(language: str | None) -> str | None:
+    """The per-request language instruction (the language the customer sees in the UI).
+    Sent as a separate system block after the cached prompt, so it never breaks the cache."""
+    if language not in LANGUAGES:
+        return None
+    name = LANGUAGES[language]
+    return (f"Reply language: {name}. The customer's screen is in {name}: write your whole "
+            f"reply in {name}, whatever language earlier messages or tool results use.")
+
 
 CHAT_SYSTEM_PROMPT = f"""\
 You are BankBot, the virtual assistant of a bank, answering general questions (how products \

@@ -14,7 +14,7 @@ from typing import Any, Literal
 from aiplatform.agent.actions import ActionStore, PendingAction
 from aiplatform.agent.tools import Tool, ToolContext
 from aiplatform.chat.inflight import InFlight
-from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT
+from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, reply_language
 from aiplatform.chat.repository import Conversation, ConversationRepository
 from aiplatform.chat.service import assistant_turn, check_history_size
 from aiplatform.llm.gateway import AIGateway, Completed, TextDelta
@@ -95,17 +95,17 @@ class AgentRunner:
         self._definitions = [t.definition() for t in tools]  # fixed per route for caching
         self._max_iterations = max_iterations
 
-    async def run(self, user_id: str, conversation_id: str,
-                  text: str) -> AsyncIterator[AgentEvent]:
+    async def run(self, user_id: str, conversation_id: str, text: str,
+                  language: str | None = None) -> AsyncIterator[AgentEvent]:
         conv = await self._repo.get(conversation_id, user_id)
         with self._inflight.hold(conv.id):
             check_history_size(conv.messages)
             await self._repo.append(conv, {"role": "user", "content": text})
-            async for event in self._loop(user_id, conv):
+            async for event in self._loop(user_id, conv, language):
                 yield event
 
     async def decide(self, user_id: str, conversation_id: str, action_id: str,
-                     approve: bool) -> AsyncIterator[AgentEvent]:
+                     approve: bool, language: str | None = None) -> AsyncIterator[AgentEvent]:
         """Approve (run the tool) or reject a pending action, then let the agent continue."""
         conv = await self._repo.get(conversation_id, user_id)
         with self._inflight.hold(conv.id):
@@ -122,11 +122,13 @@ class AgentRunner:
                 yield ToolResult(action.tool_use_id, action.tool_name, is_error, content)
                 result = f"ERROR: {content}" if is_error else content
             await self._repo.append(conv, {"role": "user", "content": decision_text(action, result)})
-            async for event in self._loop(user_id, conv):
+            async for event in self._loop(user_id, conv, language):
                 yield event
 
-    async def _loop(self, user_id: str, conv: Conversation) -> AsyncIterator[AgentEvent]:
+    async def _loop(self, user_id: str, conv: Conversation,
+                    language: str | None) -> AsyncIterator[AgentEvent]:
         route = ROUTES["agent"]
+        suffix = reply_language(language)
         tool_calls: list[str] = []
         pending = False
         for _ in range(self._max_iterations):
@@ -134,7 +136,7 @@ class AgentRunner:
             completed: Completed | None = None
             async for event in self._gateway.stream(
                     route, system=AGENT_SYSTEM_PROMPT, messages=conv.messages,
-                    tools=self._definitions, conversation_id=conv.id):
+                    tools=self._definitions, conversation_id=conv.id, system_suffix=suffix):
                 if isinstance(event, TextDelta):
                     yield AgentText(event.text)
                 else:
