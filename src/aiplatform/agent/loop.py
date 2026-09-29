@@ -1,85 +1,38 @@
-"""Agent tool loop: call the model, run the tools it asks for, repeat until done.
+"""Agent runs: call the model, run the tools it asks for, repeat until done.
 
-Runs are streamed as events. Irreversible tools never run inside the loop: they
-become pending actions, and run only after the user approves them.
+The loop itself is a LangGraph graph (``agent/graph.py``); this module holds the
+entry points that guard the conversation and stream the graph's events.
 """
 
-import asyncio
-import json
-import logging
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
-from typing import Any, Literal
 
-from aiplatform.agent.actions import ActionStore, PendingAction
-from aiplatform.agent.tools import Tool, ToolContext
+from aiplatform.agent.actions import ActionStore
+from aiplatform.agent.events import (  # noqa: F401  (re-exported for callers)
+    AgentDone,
+    AgentEvent,
+    AgentText,
+    ApprovalRequired,
+    Outcome,
+    ToolCall,
+    ToolResult,
+)
+from aiplatform.agent.graph import (  # noqa: F401  (re-exported for callers)
+    MAX_TOOL_RESULT_CHARS,
+    Decision,
+    awaiting_approval_text,
+    build_agent_graph,
+    decision_text,
+    initial_state,
+    recursion_limit,
+)
+from aiplatform.agent.tools import Tool
+from aiplatform.chat.history import check_history_size
 from aiplatform.chat.inflight import InFlight
-from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, reply_language
+from aiplatform.chat.prompts import reply_language
 from aiplatform.chat.repository import Conversation, ConversationRepository
-from aiplatform.chat.service import assistant_turn, check_history_size
-from aiplatform.llm.gateway import AIGateway, Completed, TextDelta
-from aiplatform.llm.models import ROUTES
-from aiplatform.usage import UsageEvent, UsageStore
-
-log = logging.getLogger(__name__)
-
-Outcome = Literal["done", "approval_required", "refused", "truncated", "max_iterations"]
-
-# Keep one tool result from flooding the context window.
-MAX_TOOL_RESULT_CHARS = 20_000
-
-
-def awaiting_approval_text(action: PendingAction) -> str:
-    return (f"Awaiting the user's approval (action {action.id}). This action has NOT been "
-            "executed yet. Tell the user briefly what you intend to do; they will approve "
-            "or reject it.")
-
-
-def decision_text(action: PendingAction, result: str | None) -> str:
-    # Sent as a user-role message: history stays append-only (tool results are never edited).
-    header = f"[Approval] The user {action.status.upper()} action {action.id} ({action.tool_name})."
-    if result is None:
-        return header + " It was not executed."
-    return f"{header} It was executed. Result:\n{result}"
-
-
-# --- Events streamed to the client -------------------------------------------
-
-@dataclass
-class AgentText:
-    text: str
-
-
-@dataclass
-class ToolCall:
-    id: str
-    name: str
-    input: dict[str, Any]
-
-
-@dataclass
-class ToolResult:
-    id: str
-    name: str
-    is_error: bool
-    content: str
-
-
-@dataclass
-class ApprovalRequired:
-    action_id: str
-    tool_name: str
-    input: dict[str, Any]
-
-
-@dataclass
-class AgentDone:
-    outcome: Outcome
-    text: str
-    tool_calls: list[str]
-
-
-AgentEvent = AgentText | ToolCall | ToolResult | ApprovalRequired | AgentDone
+from aiplatform.graph_stream import stream_graph
+from aiplatform.llm.gateway import AIGateway
+from aiplatform.usage import UsageStore
 
 
 class AgentRunner:
@@ -91,9 +44,10 @@ class AgentRunner:
         self._usage = usage
         self._inflight = inflight
         self._actions = actions
-        self._tools = {t.name: t for t in tools}
-        self._definitions = [t.definition() for t in tools]  # fixed per route for caching
-        self._max_iterations = max_iterations
+        self._graph = build_agent_graph(
+            gateway=gateway, repo=repo, usage=usage, actions=actions,
+            tools={t.name: t for t in tools}, max_iterations=max_iterations)
+        self._config = {"recursion_limit": recursion_limit(max_iterations)}
 
     async def run(self, user_id: str, conversation_id: str, text: str,
                   language: str | None = None) -> AsyncIterator[AgentEvent]:
@@ -101,7 +55,7 @@ class AgentRunner:
         with self._inflight.hold(conv.id):
             check_history_size(conv.messages)
             await self._repo.append(conv, {"role": "user", "content": text})
-            async for event in self._loop(user_id, conv, language):
+            async for event in self._stream(user_id, conv, language):
                 yield event
 
     async def decide(self, user_id: str, conversation_id: str, action_id: str,
@@ -109,110 +63,12 @@ class AgentRunner:
         """Approve (run the tool) or reject a pending action, then let the agent continue."""
         conv = await self._repo.get(conversation_id, user_id)
         with self._inflight.hold(conv.id):
-            action = await self._actions.decide(action_id, user_id=user_id,
-                                                conversation_id=conv.id, approve=approve)
-            result = None
-            if approve:
-                tool = self._tools.get(action.tool_name)
-                if tool is None:
-                    content, is_error = f"tool no longer available: {action.tool_name}", True
-                else:
-                    content, is_error = await self._invoke(
-                        tool, action.input, ToolContext(user_id, conv.id))
-                yield ToolResult(action.tool_use_id, action.tool_name, is_error, content)
-                result = f"ERROR: {content}" if is_error else content
-            await self._repo.append(conv, {"role": "user", "content": decision_text(action, result)})
-            async for event in self._loop(user_id, conv, language):
+            async for event in self._stream(user_id, conv, language,
+                                            Decision(action_id, approve)):
                 yield event
 
-    async def _loop(self, user_id: str, conv: Conversation,
-                    language: str | None) -> AsyncIterator[AgentEvent]:
-        route = ROUTES["agent"]
-        suffix = reply_language(language)
-        tool_calls: list[str] = []
-        pending = False
-        for _ in range(self._max_iterations):
-            check_history_size(conv.messages)
-            completed: Completed | None = None
-            async for event in self._gateway.stream(
-                    route, system=AGENT_SYSTEM_PROMPT, messages=conv.messages,
-                    tools=self._definitions, conversation_id=conv.id, system_suffix=suffix):
-                if isinstance(event, TextDelta):
-                    yield AgentText(event.text)
-                else:
-                    completed = event
-            assert completed is not None
-            message = completed.message
-            await self._usage.record(UsageEvent.from_message(
-                message, user_id=user_id, conversation_id=conv.id,
-                route=route.name, provider=completed.provider))
-            final_text = "".join(b.text for b in message.content if b.type == "text")
-
-            if message.stop_reason == "refusal":
-                yield AgentDone("refused", final_text, tool_calls)
-                return
-            tool_uses = [b for b in message.content if b.type == "tool_use"]
-            if tool_uses and message.stop_reason == "max_tokens":
-                # A truncated tool call must not run; don't store the half-finished turn.
-                yield AgentDone("truncated", final_text, tool_calls)
-                return
-
-            await self._repo.append(conv, assistant_turn(message))
-            if message.stop_reason == "pause_turn":
-                continue
-            if not tool_uses:
-                yield AgentDone("approval_required" if pending else "done", final_text,
-                                tool_calls)
-                return
-
-            for block in tool_uses:
-                yield ToolCall(block.id, block.name, block.input)
-            # Run all requested tools concurrently; return every result in ONE user message.
-            outcomes = await asyncio.gather(*(self._execute(b, user_id, conv) for b in tool_uses))
-            results = []
-            for block, (result, event) in zip(tool_uses, outcomes, strict=True):
-                results.append(result)
-                yield event
-                if isinstance(event, ApprovalRequired):
-                    pending = True
-            tool_calls.extend(b.name for b in tool_uses)
-            await self._repo.append(conv, {"role": "user", "content": results})
-
-        yield AgentDone("max_iterations", "", tool_calls)
-
-    async def _execute(self, block, user_id: str,
-                       conv: Conversation) -> tuple[dict, ToolResult | ApprovalRequired]:
-        def result(content: str, is_error: bool = False) -> tuple[dict, ToolResult]:
-            out = {"type": "tool_result", "tool_use_id": block.id, "content": content}
-            if is_error:
-                out["is_error"] = True
-            return out, ToolResult(block.id, block.name, is_error, content)
-
-        tool = self._tools.get(block.name)
-        if tool is None:
-            return result(f"unknown tool: {block.name}", True)
-        if error := tool.validate(block.input):
-            return result(f"invalid input: {error}", True)
-        if tool.irreversible:
-            action = await self._actions.create(
-                conversation_id=conv.id, user_id=user_id, tool_use_id=block.id,
-                tool_name=block.name, input=block.input)
-            out = {"type": "tool_result", "tool_use_id": block.id,
-                   "content": awaiting_approval_text(action)}
-            return out, ApprovalRequired(action.id, block.name, block.input)
-        return result(*await self._invoke(tool, block.input, ToolContext(user_id, conv.id)))
-
-    async def _invoke(self, tool: Tool, args: dict[str, Any],
-                      ctx: ToolContext) -> tuple[str, bool]:
-        try:
-            output = await asyncio.wait_for(tool.handler(args, ctx), tool.timeout_s)
-        except TimeoutError:
-            return "tool timed out", True
-        except Exception as exc:
-            log.exception("tool failed", extra={"tool": tool.name})
-            return f"tool failed: {type(exc).__name__}", True
-        if not isinstance(output, str):
-            output = json.dumps(output, default=str, ensure_ascii=False)
-        if len(output) > MAX_TOOL_RESULT_CHARS:
-            output = output[:MAX_TOOL_RESULT_CHARS] + "\n[truncated: result too long]"
-        return output, False
+    async def _stream(self, user_id: str, conv: Conversation, language: str | None,
+                      decision: Decision | None = None) -> AsyncIterator[AgentEvent]:
+        state = initial_state(user_id, conv, reply_language(language), decision)
+        async for event in stream_graph(self._graph, state, self._config):
+            yield event

@@ -1,34 +1,26 @@
-"""Chat turns: append the user message, stream the model reply, persist it."""
+"""Chat turns: append the user message, stream the model reply, persist it.
+
+The reply itself runs as a LangGraph graph (``chat/graph.py``)."""
 
 from collections.abc import AsyncIterator
 
+from aiplatform.chat.graph import build_chat_graph
+from aiplatform.chat.history import (  # noqa: F401  (re-exported for callers)
+    MAX_HISTORY_CHARS,
+    ConversationTooLong,
+    assistant_turn,
+    check_history_size,
+)
 from aiplatform.chat.inflight import InFlight
-from aiplatform.chat.prompts import CHAT_SYSTEM_PROMPT, reply_language
+from aiplatform.chat.prompts import reply_language
 from aiplatform.chat.repository import Conversation, ConversationRepository
+from aiplatform.graph_stream import stream_graph
 from aiplatform.llm.gateway import AIGateway, Completed, TextDelta
-from aiplatform.llm.models import ROUTES
-from aiplatform.usage import UsageEvent, UsageStore
-
-# Claude Haiku 4.5 has a 200K-token context window; leave room for the reply.
-MAX_HISTORY_CHARS = 150_000 * 4  # rough chars-per-token estimate
-
-
-class ConversationTooLong(Exception):
-    pass
+from aiplatform.usage import UsageStore
 
 
 class NothingToRegenerate(Exception):
     pass
-
-
-def check_history_size(messages: list[dict]) -> None:
-    if sum(len(str(m["content"])) for m in messages) > MAX_HISTORY_CHARS:
-        raise ConversationTooLong()
-
-
-def assistant_turn(message) -> dict:
-    # Keep the full content blocks, not only the text.
-    return {"role": "assistant", "content": [block.to_dict() for block in message.content]}
 
 
 class ChatService:
@@ -38,6 +30,7 @@ class ChatService:
         self._repo = repo
         self._usage = usage
         self._inflight = inflight
+        self._graph = build_chat_graph(gateway=gateway, repo=repo, usage=usage)
 
     async def send(self, user_id: str, conversation_id: str, text: str,
                    language: str | None = None) -> AsyncIterator[TextDelta | Completed]:
@@ -61,15 +54,6 @@ class ChatService:
 
     async def _reply(self, user_id: str, conv: Conversation,
                      language: str | None) -> AsyncIterator[TextDelta | Completed]:
-        route = ROUTES["chat"]
-        async for event in self._gateway.stream(route, system=CHAT_SYSTEM_PROMPT,
-                                                messages=conv.messages, conversation_id=conv.id,
-                                                system_suffix=reply_language(language)):
-            if isinstance(event, Completed):
-                message = event.message
-                await self._usage.record(UsageEvent.from_message(
-                    message, user_id=user_id, conversation_id=conv.id,
-                    route=route.name, provider=event.provider))
-                if message.stop_reason != "refusal" and message.content:
-                    await self._repo.append(conv, assistant_turn(message))
+        state = {"user_id": user_id, "conv": conv, "suffix": reply_language(language)}
+        async for event in stream_graph(self._graph, state, {}):
             yield event

@@ -14,11 +14,11 @@ src/aiplatform/
   llm/models.py      model profiles + per-route config  <- change models here
   llm/gateway.py     AI Gateway: retries, circuit breaker, failover, cache breakpoints
   llm/providers.py   Claude API / Bedrock / Vertex clients
-  chat/              conversations (append-only) and streamed chat turns
+  chat/              conversations (append-only) and streamed chat turns (LangGraph)
   storage/           Postgres/SQL schema + repository and usage store
   usage.py           token usage events and the daily token quota
   auth.py            OIDC access-token (JWT) verification
-  agent/             tool registry and the agent tool loop
+  agent/             tool registry and the agent tool loop (LangGraph graph)
   api/app.py         HTTP API (SSE streaming) + serves the web UI
   web/               web chat UI (plain HTML/CSS/JS, no build step)
 migrations/          Alembic migrations (must match storage/tables.py)
