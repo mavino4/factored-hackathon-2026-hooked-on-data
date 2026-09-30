@@ -9,9 +9,9 @@
 | **Growth target** | 1M+ concurrent users, spiky, global (§1 onward) |
 | **Stack** | Python 3.12, FastAPI, Anthropic Python SDK; light model (Claude Haiku 4.5) for first versions |
 
-**v1 as built:** [interactive diagram](bankbot-architecture.html) (open locally in a browser; each box links to its source lines at commit `93fd40b`), including self-hosted Langfuse tracing with PII masking. Spec: [`bankbot-architecture.json`](bankbot-architecture.json), generated with [Archify](https://github.com/tt-a1i/archify).
+**v1 as built:** [interactive diagram](bankbot-architecture.html) (open locally in a browser; each box links to its source lines at commit `fe076cc`): one agent that classifies each message first, human handoff, and self-hosted Langfuse tracing with PII masking. Spec: [`bankbot-architecture.json`](bankbot-architecture.json), generated with [Archify](https://github.com/tt-a1i/archify).
 
-![BankBot v1 architecture](bankbot-architecture.png)
+![BankBot v1 architecture: unified agent, human handoff and masked tracing](bankbot-architecture.png)
 
 ---
 
