@@ -2,107 +2,699 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "BankBot (AI Platform v1) — Architecture",
+    "title": "BankBot (AI Platform v1) — Unified Agent, Human Handoff and Masked Tracing",
     "output": "docs/architecture/bankbot-architecture.html",
     "locale": "en",
     "quality_profile": "showcase",
     "repository": {
       "url": "git@github.com:mavino4/DatathonFactored.git",
       "link_mode": "local-only",
-      "revision": "0c76db2b00d6c58649dbbc209bb1101ae20d11b8"
+      "revision": "fe076cc04224bc65f8d02993c391a419f13afbde"
     }
   },
   "components": [
-    { "id": "webui", "type": "frontend", "label": "Web UI", "sublabel": "BankBot · es / pt / en", "pos": [40, 300], "size": [140, 64],
+    {
+      "id": "customer",
+      "type": "frontend",
+      "label": "Customer browser",
+      "sublabel": "Web UI · one query button",
+      "pos": [
+        20,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ],
       "sources": [
-        { "path": "src/aiplatform/web/app.js", "line": 202, "end_line": 218, "label": "API calls + SSE over POST" },
-        { "path": "src/aiplatform/web/app.js", "line": 472, "end_line": 473, "label": "sends UI language" },
-        { "path": "src/aiplatform/api/app.py", "line": 324, "end_line": 325, "label": "static mount" }
-      ] },
-    { "id": "lb", "type": "cloud", "label": "Load Balancer", "sublabel": "nginx / k8s Ingress", "pos": [280, 300], "size": [140, 64],
+        {
+          "path": "src/aiplatform/web/app.js",
+          "line": 222,
+          "end_line": 250,
+          "label": "SSE stream client"
+        },
+        {
+          "path": "src/aiplatform/web/app.js",
+          "line": 393,
+          "end_line": 445,
+          "label": "advisor offer and polling"
+        },
+        {
+          "path": "src/aiplatform/web/app.js",
+          "line": 280,
+          "end_line": 316,
+          "label": "safe Markdown as DOM"
+        }
+      ]
+    },
+    {
+      "id": "oidc",
+      "type": "security",
+      "label": "OIDC Issuer",
+      "sublabel": "e.g. Auth0 · JWKS",
+      "pos": [
+        20,
+        110
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "dev: X-User-Id",
       "sources": [
-        { "path": "deploy/nginx.conf", "line": 2, "end_line": 7 },
-        { "path": "deploy/k8s/base/ingress.yaml", "line": 1, "end_line": 28 }
-      ] },
-    { "id": "oidc", "type": "security", "label": "OIDC Issuer", "sublabel": "Auth0 · Keycloak · dev", "pos": [535, 110], "size": [140, 64],
+        {
+          "path": "src/aiplatform/auth.py",
+          "line": 44,
+          "end_line": 105,
+          "label": "JWT verified via JWKS"
+        },
+        {
+          "path": "src/aiplatform/web/app.js",
+          "line": 64,
+          "end_line": 84,
+          "label": "PKCE login"
+        }
+      ]
+    },
+    {
+      "id": "lb",
+      "type": "cloud",
+      "label": "Load balancer",
+      "sublabel": "nginx · Ingress (k8s)",
+      "pos": [
+        260,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "buffering off",
       "sources": [
-        { "path": "src/aiplatform/auth.py", "line": 44, "end_line": 103, "label": "JWT verify via JWKS" },
-        { "path": "src/aiplatform/web/app.js", "line": 51, "end_line": 98, "label": "code + PKCE login" }
-      ] },
-    { "id": "api", "type": "backend", "label": "FastAPI API", "sublabel": "OIDC · rate limit · quota", "pos": [520, 300], "size": [170, 64], "tag": "2 replicas",
+        {
+          "path": "deploy/nginx.conf",
+          "line": 1,
+          "end_line": 15,
+          "label": "upstream app, 300 s reads"
+        },
+        {
+          "path": "docker-compose.yml",
+          "line": 30,
+          "end_line": 55,
+          "label": "2 app replicas + lb"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI API",
+      "sublabel": "auth · rate limit · quota",
+      "pos": [
+        520,
+        272
+      ],
+      "size": [
+        150,
+        120
+      ],
+      "tag": "2 replicas",
       "sources": [
-        { "path": "src/aiplatform/api/app.py", "line": 84, "end_line": 121, "label": "lifespan wiring" },
-        { "path": "src/aiplatform/api/app.py", "line": 167, "end_line": 193, "label": "current_user + admit" },
-        { "path": "deploy/k8s/base/deployment.yaml", "line": 1, "end_line": 10 }
-      ] },
-    { "id": "chat", "type": "backend", "label": "ChatService", "sublabel": "streamed chat turns", "pos": [800, 200], "size": [150, 64],
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 100,
+          "end_line": 140,
+          "label": "wiring at startup"
+        },
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 189,
+          "end_line": 215,
+          "label": "user, rate limit, quota"
+        },
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 312,
+          "end_line": 345,
+          "label": "agent runs, offer answer"
+        }
+      ]
+    },
+    {
+      "id": "appdb",
+      "type": "database",
+      "label": "App Postgres",
+      "sublabel": "messages · usage · handoffs",
+      "pos": [
+        520,
+        470
+      ],
+      "size": [
+        150,
+        64
+      ],
       "sources": [
-        { "path": "src/aiplatform/chat/service.py", "line": 34, "end_line": 74 }
-      ] },
-    { "id": "agent", "type": "backend", "label": "AgentRunner", "sublabel": "tool loop · approvals", "pos": [800, 400], "size": [150, 64],
+        {
+          "path": "src/aiplatform/storage/tables.py",
+          "line": 10,
+          "end_line": 85,
+          "label": "5 tables"
+        },
+        {
+          "path": "src/aiplatform/storage/sql.py",
+          "line": 49,
+          "end_line": 277,
+          "label": "SQL stores"
+        },
+        {
+          "path": "src/aiplatform/agent/loop.py",
+          "line": 66,
+          "end_line": 97,
+          "label": "turn stored, then run"
+        }
+      ]
+    },
+    {
+      "id": "classify",
+      "type": "backend",
+      "label": "Intent classifier",
+      "sublabel": "classify step · forced tool",
+      "pos": [
+        780,
+        300
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "first step",
       "sources": [
-        { "path": "src/aiplatform/agent/loop.py", "line": 85, "end_line": 137, "label": "run / decide / loop" },
-        { "path": "src/aiplatform/agent/loop.py", "line": 196, "end_line": 208, "label": "irreversible -> pending" }
-      ] },
-    { "id": "gateway", "type": "backend", "label": "AI Gateway", "sublabel": "retry · breaker · failover", "pos": [1070, 300], "size": [160, 64],
+        {
+          "path": "src/aiplatform/agent/graph.py",
+          "line": 189,
+          "end_line": 210,
+          "label": "classify node"
+        },
+        {
+          "path": "src/aiplatform/agent/intent.py",
+          "line": 17,
+          "end_line": 111,
+          "label": "tool, parse, repeats"
+        },
+        {
+          "path": "src/aiplatform/agent/graph.py",
+          "line": 351,
+          "end_line": 358,
+          "label": "routing"
+        }
+      ]
+    },
+    {
+      "id": "handoff",
+      "type": "backend",
+      "label": "Human handoff",
+      "sublabel": "queue · bot paused",
+      "pos": [
+        780,
+        470
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "human in the loop",
       "sources": [
-        { "path": "src/aiplatform/llm/gateway.py", "line": 92, "end_line": 138 },
-        { "path": "src/aiplatform/llm/gateway.py", "line": 59, "end_line": 69, "label": "reply-language block" },
-        { "path": "src/aiplatform/llm/models.py", "line": 45, "end_line": 55, "label": "Haiku 4.5 profile" }
-      ] },
-    { "id": "providers", "type": "external", "label": "LLM Providers", "sublabel": "Claude · Bedrock · Vertex · Ollama", "pos": [1340, 300], "size": [200, 64],
+        {
+          "path": "src/aiplatform/agent/graph.py",
+          "line": 181,
+          "end_line": 225,
+          "label": "wait and handoff nodes"
+        },
+        {
+          "path": "src/aiplatform/agent/handoffs.py",
+          "line": 1,
+          "end_line": 95,
+          "label": "lifecycle and store"
+        },
+        {
+          "path": "src/aiplatform/agent/loop.py",
+          "line": 99,
+          "end_line": 125,
+          "label": "accept, reply, close"
+        }
+      ]
+    },
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "Advisor (operator)",
+      "sublabel": "AIP_ADMIN_USERS",
+      "pos": [
+        780,
+        820
+      ],
+      "size": [
+        160,
+        64
+      ],
       "sources": [
-        { "path": "src/aiplatform/llm/providers.py", "line": 15, "end_line": 46 }
-      ] },
-    { "id": "appdb", "type": "database", "label": "App Postgres", "sublabel": "conversations · usage · actions", "pos": [330, 540], "size": [180, 64],
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 344,
+          "end_line": 397,
+          "label": "operator API"
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "Agent tool loop",
+      "sublabel": "LangGraph · call_model ⇄ run_tools",
+      "pos": [
+        1060,
+        300
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "approval gate",
       "sources": [
-        { "path": "src/aiplatform/storage/tables.py", "line": 10, "end_line": 65 },
-        { "path": "src/aiplatform/storage/sql.py", "line": 35, "end_line": 150 },
-        { "path": "src/aiplatform/api/app.py", "line": 91, "end_line": 99, "label": "SQL or in-memory" }
-      ] },
-    { "id": "bankdb", "type": "database", "label": "Bank DB", "sublabel": "RLS on app.subject", "pos": [665, 540], "size": [150, 64], "tag": "read-only",
+        {
+          "path": "src/aiplatform/agent/graph.py",
+          "line": 246,
+          "end_line": 320,
+          "label": "model and tool steps"
+        },
+        {
+          "path": "src/aiplatform/agent/graph.py",
+          "line": 295,
+          "end_line": 301,
+          "label": "irreversible → pending"
+        },
+        {
+          "path": "src/aiplatform/agent/graph.py",
+          "line": 321,
+          "end_line": 349,
+          "label": "offer on insistence"
+        }
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "AI Gateway",
+      "sublabel": "retry · breaker · failover",
+      "pos": [
+        1060,
+        150
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "sticky provider",
       "sources": [
-        { "path": "deploy/bankdb/schema.sql", "line": 60, "end_line": 79, "label": "RLS policies" },
-        { "path": "src/aiplatform/banking/repository.py", "line": 79, "end_line": 121 }
-      ] }
+        {
+          "path": "src/aiplatform/llm/gateway.py",
+          "line": 99,
+          "end_line": 200,
+          "label": "stream with failover"
+        },
+        {
+          "path": "src/aiplatform/llm/gateway.py",
+          "line": 214,
+          "end_line": 259,
+          "label": "spans, usage and cost"
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "external",
+      "label": "LLM providers",
+      "sublabel": "Claude · Bedrock · Vertex · Ollama",
+      "pos": [
+        1055,
+        10
+      ],
+      "size": [
+        200,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/llm/providers.py",
+          "line": 15,
+          "end_line": 50,
+          "label": "client per provider"
+        },
+        {
+          "path": "src/aiplatform/llm/models.py",
+          "line": 90,
+          "end_line": 94,
+          "label": "classify and agent routes"
+        }
+      ]
+    },
+    {
+      "id": "tools",
+      "type": "backend",
+      "label": "Banking tools",
+      "sublabel": "profile · products",
+      "pos": [
+        1080,
+        470
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "read-only",
+      "sources": [
+        {
+          "path": "src/aiplatform/banking/tools.py",
+          "line": 65,
+          "end_line": 113,
+          "label": "tool definitions"
+        },
+        {
+          "path": "src/aiplatform/agent/graph.py",
+          "line": 137,
+          "end_line": 145,
+          "label": "traced tool call"
+        }
+      ]
+    },
+    {
+      "id": "bankdb",
+      "type": "database",
+      "label": "Core-banking DB",
+      "sublabel": "customers · products",
+      "pos": [
+        1080,
+        820
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/banking/repository.py",
+          "line": 79,
+          "end_line": 120,
+          "label": "SET app.subject per tx"
+        },
+        {
+          "path": "deploy/bankdb/schema.sql",
+          "line": 58,
+          "end_line": 80,
+          "label": "Row-Level Security"
+        }
+      ]
+    },
+    {
+      "id": "masker",
+      "type": "security",
+      "label": "Trace masking",
+      "sublabel": "span per step · privacy.Masker",
+      "pos": [
+        1340,
+        470
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "PII → placeholders",
+      "sources": [
+        {
+          "path": "src/aiplatform/tracing.py",
+          "line": 60,
+          "end_line": 145,
+          "label": "run, step, model, tool spans"
+        },
+        {
+          "path": "src/aiplatform/privacy.py",
+          "line": 98,
+          "end_line": 165,
+          "label": "mask and pseudonym"
+        }
+      ]
+    },
+    {
+      "id": "langfuse",
+      "type": "cloud",
+      "label": "Langfuse (self-hosted)",
+      "sublabel": "web · worker · ClickHouse",
+      "pos": [
+        1350,
+        640
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "tag": "internal only",
+      "sources": [
+        {
+          "path": "deploy/langfuse/docker-compose.yml",
+          "line": 50,
+          "end_line": 151,
+          "label": "local stack v4.47.0"
+        },
+        {
+          "path": "deploy/langfuse/values.yaml",
+          "line": 1,
+          "end_line": 50,
+          "label": "Helm values"
+        },
+        {
+          "path": "deploy/k8s/base/networkpolicy.yaml",
+          "line": 42,
+          "end_line": 49,
+          "label": "egress :3000"
+        }
+      ]
+    }
   ],
   "boundaries": [
-    { "kind": "region", "label": "API process (FastAPI, in-process modules)", "wraps": ["api", "chat", "agent", "gateway"], "pad": 20 },
-    { "kind": "region", "label": "PostgreSQL 16", "wraps": ["appdb", "bankdb"], "pad": 16 }
+    {
+      "kind": "region",
+      "label": "Your infrastructure · Docker Compose locally, Kubernetes in production",
+      "wraps": [
+        "lb",
+        "api",
+        "appdb",
+        "classify",
+        "handoff",
+        "agent",
+        "gateway",
+        "tools",
+        "masker",
+        "langfuse"
+      ],
+      "pad": 22
+    },
+    {
+      "kind": "security-group",
+      "label": "tracing UI · internal network only",
+      "wraps": [
+        "langfuse"
+      ],
+      "pad": 12
+    },
+    {
+      "kind": "security-group",
+      "label": "read-only bank_reader + RLS",
+      "wraps": [
+        "bankdb"
+      ],
+      "pad": 12
+    }
   ],
   "connections": [
-    { "from": "webui", "to": "lb", "label": "HTTPS · SSE", "variant": "emphasis" },
-    { "from": "lb", "to": "api", "label": "proxy_pass", "variant": "emphasis" },
-    { "from": "webui", "to": "oidc", "label": "login (PKCE)", "variant": "security" },
-    { "from": "api", "to": "oidc", "label": "JWKS", "variant": "security" },
-    { "from": "api", "to": "chat", "label": "chat turn", "variant": "emphasis" },
-    { "from": "api", "to": "agent", "label": "agent run", "variant": "emphasis" },
-    { "from": "chat", "to": "gateway", "label": "stream", "variant": "emphasis" },
-    { "from": "agent", "to": "gateway", "label": "stream + tools", "variant": "emphasis" },
-    { "from": "gateway", "to": "providers", "label": "Messages API", "variant": "emphasis" },
-    { "from": "api", "to": "appdb", "label": "SQLAlchemy" },
-    { "from": "api", "to": "bankdb", "label": "GET /v1/me", "variant": "security" },
-    { "from": "agent", "to": "bankdb", "label": "bank tools", "variant": "security" }
+    {
+      "id": "https",
+      "from": "customer",
+      "to": "lb",
+      "label": "HTTPS · SSE",
+      "variant": "emphasis"
+    },
+    {
+      "id": "login",
+      "from": "customer",
+      "to": "oidc",
+      "label": "PKCE login",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "proxy",
+      "from": "lb",
+      "to": "api",
+      "label": ":8000",
+      "variant": "emphasis"
+    },
+    {
+      "id": "verify",
+      "from": "api",
+      "to": "oidc",
+      "label": "verify JWT",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "right"
+    },
+    {
+      "id": "every-message",
+      "from": "api",
+      "to": "classify",
+      "label": "each message",
+      "variant": "emphasis"
+    },
+    {
+      "id": "store",
+      "from": "api",
+      "to": "appdb",
+      "label": "turns · quota",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "classify-llm",
+      "from": "classify",
+      "to": "gateway",
+      "label": "forced tool",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "route",
+      "from": "classify",
+      "to": "agent",
+      "label": "tools if account",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ask-human",
+      "from": "classify",
+      "to": "handoff",
+      "label": "human",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "offer",
+      "from": "agent",
+      "to": "handoff",
+      "label": "offer on insistence",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "queue",
+      "from": "handoff",
+      "to": "appdb",
+      "label": "handoffs",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "operator-api",
+      "from": "operator",
+      "to": "handoff",
+      "label": "reply · close",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "agent-llm",
+      "from": "agent",
+      "to": "gateway",
+      "label": "stream",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "messages-api",
+      "from": "gateway",
+      "to": "providers",
+      "label": "Messages API",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "call-tools",
+      "from": "agent",
+      "to": "tools",
+      "label": "read-only calls",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "rls-query",
+      "from": "tools",
+      "to": "bankdb",
+      "label": "SQL as customer",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "spans",
+      "from": "agent",
+      "to": "masker",
+      "label": "spans",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "otlp",
+      "from": "masker",
+      "to": "langfuse",
+      "label": "OTLP · masked",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
   ],
   "cards": [
-    { "dot": "rose", "title": "Security", "items": [
-      "Every /v1 call needs a Bearer JWT verified against the issuer's JWKS; dev header mode is refused in production",
-      "Bank DB access (bank tools and the /v1/me greeting name) sets app.subject to the token sub; Postgres RLS hides every other customer",
-      "The agent SSE stream shows tool progress only: no tool arguments or raw results reach the customer",
-      "Irreversible tools become pending actions and run only after the user approves"
-    ] },
-    { "dot": "violet", "title": "Reply language", "items": [
-      "The UI sends its language (es / pt / en) with every chat, agent, regenerate and approval request",
-      "It reaches the model as a separate system block after the cached prompt, so the prompt-cache prefix is unchanged"
-    ] },
-    { "dot": "cyan", "title": "Persistence", "items": [
-      "ChatService and AgentRunner append messages through the conversation repository built by the API",
-      "usage_events feed the daily token quota and GET /v1/admin/usage",
-      "Without AIP_DATABASE_URL, storage falls back to in-memory (dev only)"
-    ] },
-    { "dot": "slate", "title": "Not shown", "items": [
-      "Prometheus metrics on AIP_METRICS_PORT (default 9090)",
-      "Alembic migrate job, evals/ harness, and the dev OIDC issuer script"
-    ] }
+    {
+      "dot": "emerald",
+      "title": "One agent, classified first",
+      "items": [
+        "Every message is classified: account, general, out_of_scope or human",
+        "Only account questions get the tool definitions",
+        "If the classifier fails, the full agent with tools answers"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Human in the loop",
+      "items": [
+        "Asking for a person opens a handoff; the bot stops answering",
+        "Insistence offers an advisor (Yes / No); no new offer for 3 turns after No",
+        "Advisors reply and close through the operator API; replies carry author=operator"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Privacy in traces",
+      "items": [
+        "One span per graph step, with its model calls and tools nested under it",
+        "Name, city, last 4, amounts and document numbers become placeholders",
+        "User ID sent as a keyed hash; AIP_TRACE_HASH_KEY required in production"
+      ]
+    }
   ]
 }
