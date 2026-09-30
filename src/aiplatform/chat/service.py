@@ -16,6 +16,7 @@ from aiplatform.chat.prompts import reply_language
 from aiplatform.chat.repository import Conversation, ConversationRepository
 from aiplatform.graph_stream import stream_graph
 from aiplatform.llm.gateway import AIGateway, Completed, TextDelta
+from aiplatform.tracing import Tracing, run_config
 from aiplatform.usage import UsageStore
 
 
@@ -25,11 +26,12 @@ class NothingToRegenerate(Exception):
 
 class ChatService:
     def __init__(self, gateway: AIGateway, repo: ConversationRepository,
-                 usage: UsageStore, inflight: InFlight):
+                 usage: UsageStore, inflight: InFlight, tracing: Tracing | None = None):
         self._gateway = gateway
         self._repo = repo
         self._usage = usage
         self._inflight = inflight
+        self._tracing = tracing
         self._graph = build_chat_graph(gateway=gateway, repo=repo, usage=usage)
 
     async def send(self, user_id: str, conversation_id: str, text: str,
@@ -55,5 +57,7 @@ class ChatService:
     async def _reply(self, user_id: str, conv: Conversation,
                      language: str | None) -> AsyncIterator[TextDelta | Completed]:
         state = {"user_id": user_id, "conv": conv, "suffix": reply_language(language)}
-        async for event in stream_graph(self._graph, state, {}):
+        config = run_config("chat", user_id=user_id, conversation_id=conv.id,
+                            language=language)
+        async for event in stream_graph(self._graph, state, config, self._tracing):
             yield event

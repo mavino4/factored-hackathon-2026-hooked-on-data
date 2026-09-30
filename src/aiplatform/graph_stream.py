@@ -14,6 +14,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from aiplatform.tracing import Tracing
+
 _DONE = object()
 
 Emit = Callable[[Any], Awaitable[None]]
@@ -24,8 +26,10 @@ def emitter() -> Emit:
     return get_config()["configurable"]["emit"]
 
 
-async def stream_graph(graph, state: Any, config: dict) -> AsyncIterator[Any]:
+async def stream_graph(graph, state: Any, config: dict,
+                       tracing: Tracing | None = None) -> AsyncIterator[Any]:
     queue: asyncio.Queue = asyncio.Queue()
+    tracing = tracing or Tracing()
 
     async def emit(event: Any) -> None:
         await queue.put(event)
@@ -33,7 +37,9 @@ async def stream_graph(graph, state: Any, config: dict) -> AsyncIterator[Any]:
 
     async def run() -> None:
         try:
-            await graph.ainvoke(state, {**config, "configurable": {"emit": emit}})
+            # Entered inside the task, so the tracing context never leaks to the caller.
+            with tracing.run(config) as run_config:
+                await graph.ainvoke(state, {**run_config, "configurable": {"emit": emit}})
         finally:
             queue.put_nowait(_DONE)
 

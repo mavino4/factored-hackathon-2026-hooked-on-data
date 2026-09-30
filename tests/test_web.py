@@ -152,6 +152,9 @@ def test_user_data_is_never_cached():
             "cache-control"] == "no-store"
         assert http.get("/config.json").headers["cache-control"] == "no-store"
         assert http.get("/").headers["cache-control"] == "no-store"
+        # Scripts and styles are revalidated, so a new UI release is picked up on reload.
+        assert http.get("/app.js").headers["cache-control"] == "no-cache"
+        assert http.get("/style.css").headers["cache-control"] == "no-cache"
 
 
 def test_dev_issuer_logout_redirects_only_to_localhost(issuer):

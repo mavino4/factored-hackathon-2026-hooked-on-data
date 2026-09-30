@@ -49,6 +49,7 @@ from aiplatform.storage.sql import (
     SqlUsageStore,
     create_engine,
 )
+from aiplatform.tracing import Tracing
 from aiplatform.usage import InMemoryUsageStore, TokenQuota
 
 log = logging.getLogger(__name__)
@@ -108,7 +109,8 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         app.state.inflight = inflight
         app.state.quota = TokenQuota(usage, settings.user_tokens_per_day)
         app.state.limiter = RateLimiter(settings.user_requests_per_minute)
-        app.state.chat = ChatService(gw, repo, usage, inflight)
+        tracing = Tracing.from_settings(settings)
+        app.state.chat = ChatService(gw, repo, usage, inflight, tracing)
         bank = bank_repo
         if bank is None and settings.bank_database_url is not None:
             bank = PostgresBankRepository(settings.bank_database_url.get_secret_value())
@@ -118,8 +120,10 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             agent_tools = make_bank_tools(bank) if bank is not None else []
             if bank is None:
                 log.warning("AIP_BANK_DATABASE_URL not set: the agent has no banking tools")
-        app.state.agent = AgentRunner(gw, repo, usage, inflight, actions, agent_tools)
+        app.state.agent = AgentRunner(gw, repo, usage, inflight, actions, agent_tools,
+                                      tracing=tracing)
         yield
+        tracing.flush()
         if bank is not None and bank_repo is None:
             await bank.close()
         if metrics_server is not None:
@@ -149,6 +153,10 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
                 # Per-user data, and the page that displays it: never stored by the browser
                 # or a proxy (also keeps the back button from restoring a signed-out page).
                 response.headers["Cache-Control"] = "no-store"
+            elif path.endswith((".js", ".css")):
+                # Revalidate on every load (cheap 304 via ETag), so a new release of the UI
+                # is never mixed with a cached old script.
+                response.headers["Cache-Control"] = "no-cache"
             return response
         finally:
             route = request.scope.get("route")
