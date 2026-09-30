@@ -39,3 +39,11 @@ spec:
           port: 443
         - protocol: TCP
           port: 5432
+    # Self-hosted Langfuse (tracing), in-cluster (deploy/langfuse/values.yaml).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: langfuse
+      ports:
+        - protocol: TCP
+          port: 3000

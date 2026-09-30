@@ -25,6 +25,7 @@ from aiplatform.llm.resilience import (
     classify,
     retry_after_seconds,
 )
+from aiplatform.tracing import llm_span
 
 log = logging.getLogger(__name__)
 
@@ -142,20 +143,26 @@ class AIGateway:
                 emitted = False
                 started = time.perf_counter()
                 try:
-                    # Fail fast if the provider stalls before sending anything; once the
-                    # stream has started, the SDK's per-read timeout applies.
-                    async with asyncio.timeout(self._first_event_timeout(route, provider)) as deadline:
-                        async with client.messages.stream(**params) as stream:
-                            async for event in stream:
-                                if deadline.when() is not None:
-                                    deadline.reschedule(None)
-                                if event.type == "text":
-                                    if not emitted:
-                                        metrics.LLM_TTFT.labels(route.name, provider).observe(
-                                            time.perf_counter() - started)
-                                    emitted = True
-                                    yield TextDelta(event.text)
-                            message = await stream.get_final_message()
+                    # One traced generation per attempt (a no-op unless tracing is on).
+                    async with _llm_span(route, provider, params, attempt) as span:
+                        # Fail fast if the provider stalls before sending anything; once the
+                        # stream has started, the SDK's per-read timeout applies.
+                        async with asyncio.timeout(
+                                self._first_event_timeout(route, provider)) as deadline:
+                            async with client.messages.stream(**params) as stream:
+                                async for event in stream:
+                                    if deadline.when() is not None:
+                                        deadline.reschedule(None)
+                                    if event.type == "text":
+                                        if not emitted:
+                                            metrics.LLM_TTFT.labels(route.name, provider).observe(
+                                                time.perf_counter() - started)
+                                        emitted = True
+                                        yield TextDelta(event.text)
+                                message = await stream.get_final_message()
+                        span.update(output=message.model_dump(mode="json"),
+                                    usage_details=_usage_details(message),
+                                    cost_details={"total": _cost(message)})
                 except Exception as exc:  # classified below
                     disposition = classify(exc)
                     kind = "timeout" if isinstance(exc, TimeoutError) else disposition.value
@@ -197,6 +204,28 @@ class AIGateway:
         raise GatewayError("stream ended without a final message")
 
 
+def _llm_span(route: Route, provider: str, params: dict[str, Any], attempt: int):
+    return llm_span(f"{route.name}.{provider}", model=params["model"], params=params,
+                    metadata={"route": route.name, "provider": provider, "attempt": attempt})
+
+
+def _usage_details(message: Message) -> dict[str, int]:
+    # Langfuse's Anthropic usage keys. The cost is sent with it (our price table, the
+    # same as the metrics), since Langfuse may not know every model name.
+    usage = message.usage
+    return {"input": usage.input_tokens, "output": usage.output_tokens,
+            "cache_read_input_tokens": usage.cache_read_input_tokens or 0,
+            "cache_creation_input_tokens": usage.cache_creation_input_tokens or 0}
+
+
+def _cost(message: Message) -> float:
+    usage = message.usage
+    return prices_for(message.model).cost(
+        input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
+        cache_read_tokens=usage.cache_read_input_tokens or 0,
+        cache_write_tokens=usage.cache_creation_input_tokens or 0)
+
+
 def _record_usage(route: Route, provider: str, message: Message) -> None:
     usage = message.usage
     tokens = {
@@ -207,9 +236,7 @@ def _record_usage(route: Route, provider: str, message: Message) -> None:
     }
     for kind, count in tokens.items():
         metrics.LLM_TOKENS.labels(route.name, provider, message.model, kind).inc(count)
-    cost = prices_for(message.model).cost(
-        input_tokens=tokens["input"], output_tokens=tokens["output"],
-        cache_read_tokens=tokens["cache_read"], cache_write_tokens=tokens["cache_write"])
+    cost = _cost(message)
     metrics.LLM_COST.labels(route.name, provider, message.model).inc(cost)
     prompt_tokens = tokens["input"] + tokens["cache_read"] + tokens["cache_write"]
     if provider != "ollama" and prompt_tokens < route.model.min_cacheable_tokens:

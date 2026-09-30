@@ -142,6 +142,14 @@ make test-postgres            # same storage tests against real Postgres (see ab
 - Prometheus metrics on the internal port `AIP_METRICS_PORT` (default 9090), including time-to-first-token, tokens, estimated cost, provider errors and breaker state. See [`docs/deploy.md`](docs/deploy.md#6-what-to-monitor).
 - `GET /readyz` checks the database; `GET /healthz` is liveness only.
 - `GET /v1/admin/usage?days=7` gives a daily usage and cost report, for users listed in `AIP_ADMIN_USERS`.
+- **Tracing (self-hosted Langfuse, masked)**, off by default. Each chat or agent run is one trace: the graph steps, every model call (prompt, reply, tokens, provider, retry attempt) and every tool call (input, output, errors). Traces are grouped by conversation in Langfuse's **Sessions** view. Customer data is masked before it leaves the app: names, cities, last 4 digits, amounts, document and account numbers, emails, phones and user IDs (hashed). See [`docs/deploy.md`](docs/deploy.md#7-tracing-langfuse). To run it locally:
+
+  ```bash
+  make langfuse-env   # once: deploy/langfuse/.env with random secrets; prints the app settings
+  make langfuse-up    # Langfuse UI on http://localhost:3000
+  ```
+
+  Then add these to `.env`: `LANGFUSE_TRACING_ENABLED=true`, `LANGFUSE_BASE_URL=http://localhost:3000`, and the `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` it printed. Run the app with `make run` to trace locally. Langfuse listens on 127.0.0.1 only, so the docker-compose app containers can't reach it. Set `AIP_TRACE_MASK_AMOUNTS=false` to see real figures while debugging in dev.
 
 ## Banking assistant (Spanish / Portuguese)
 

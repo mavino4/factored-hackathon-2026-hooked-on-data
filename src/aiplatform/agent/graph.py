@@ -36,6 +36,7 @@ from aiplatform.chat.repository import Conversation, ConversationRepository
 from aiplatform.graph_stream import emitter
 from aiplatform.llm.gateway import AIGateway, Completed, TextDelta
 from aiplatform.llm.models import ROUTES
+from aiplatform.tracing import register_sensitive, tool_span
 from aiplatform.usage import UsageEvent, UsageStore
 
 log = logging.getLogger(__name__)
@@ -90,6 +91,16 @@ def recursion_limit(max_iterations: int) -> int:
 
 
 async def invoke_tool(tool: Tool, args: dict[str, Any], ctx: ToolContext) -> tuple[str, bool]:
+    # One traced tool call (a no-op unless tracing is on).
+    async with tool_span(tool.name, args, {"irreversible": tool.irreversible}) as span:
+        output, is_error = await _invoke_tool(tool, args, ctx)
+        register_sensitive(output)  # mask these values wherever they appear later
+        span.update(output=output, level="ERROR" if is_error else None,
+                    status_message=output if is_error else None)
+    return output, is_error
+
+
+async def _invoke_tool(tool: Tool, args: dict[str, Any], ctx: ToolContext) -> tuple[str, bool]:
     try:
         output = await asyncio.wait_for(tool.handler(args, ctx), tool.timeout_s)
     except TimeoutError:

@@ -125,6 +125,18 @@ button.icon { border: 0; background: none; font-size: 1.2rem; padding: .25rem .5
 .msg.user .bubble { background: var(--user-bubble); color: var(--user-text); }
 .msg.assistant .bubble { background: var(--assistant-bubble); }
 .msg.assistant .bubble:empty::after { content: "…"; color: var(--muted); }
+/* Markdown replies: block elements instead of pre-wrapped text. */
+.msg .bubble.md { white-space: normal; }
+.bubble.md > :first-child { margin-top: 0; }
+.bubble.md > :last-child { margin-bottom: 0; }
+.bubble.md p, .bubble.md ul, .bubble.md ol { margin: .45rem 0; }
+.bubble.md ul, .bubble.md ol { padding-left: 1.3rem; }
+.bubble.md li + li { margin-top: .2rem; }
+.bubble.md h3, .bubble.md h4, .bubble.md h5, .bubble.md h6 { margin: .6rem 0 .3rem; font-size: 1rem; }
+.bubble.md code {
+  font-family: ui-monospace, monospace; font-size: .9em;
+  background: var(--tool); color: var(--tool-text); padding: .05rem .3rem; border-radius: 4px;
+}
 .note { font-size: .85rem; color: var(--muted); text-align: center; }
 
 /* Greeting and quick actions */

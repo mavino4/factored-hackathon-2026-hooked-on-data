@@ -250,11 +250,77 @@ function scrollToBottom() {
   box.scrollTop = box.scrollHeight;
 }
 
+// ---------------------------------------------------------------------------
+// Markdown for the assistant's replies: a small subset (paragraphs, headings, lists,
+// **bold**, *italic*, `code`), built as DOM nodes with text nodes only - never HTML.
+// ---------------------------------------------------------------------------
+const INLINE = /\*\*(.+?)\*\*|__(.+?)__|`([^`]+)`|(?<![\w*])\*(?![\s*])(.+?)(?<![\s*])\*(?![\w*])/g;
+
+function inline(text) {
+  const out = [];
+  let last = 0;
+  for (const m of text.matchAll(INLINE)) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    if (m[1] !== undefined || m[2] !== undefined) out.push(el("strong", {}, ...inline(m[1] ?? m[2])));
+    else if (m[3] !== undefined) out.push(el("code", {}, m[3]));
+    else out.push(el("em", {}, ...inline(m[4])));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+function withBreaks(lines) {
+  return lines.flatMap((line, i) => (i ? [el("br"), ...inline(line)] : inline(line)));
+}
+
+function renderMarkdown(text) {
+  const frag = document.createDocumentFragment();
+  let para = [];
+  let list = null;
+  const flush = () => {
+    if (para.length) frag.append(el("p", {}, ...withBreaks(para)));
+    para = [];
+  };
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    const heading = line.match(/^(#{1,4})\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
+    const numbered = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
+    if (bullet || numbered) {
+      flush();
+      const tag = bullet ? "ul" : "ol";
+      if (!list || list.tagName.toLowerCase() !== tag) {
+        list = el(tag);
+        if (numbered && numbered[1] !== "1") list.setAttribute("start", numbered[1]);
+        frag.append(list);
+      }
+      list.append(el("li", {}, ...inline(bullet ? bullet[1] : numbered[2])));
+      continue;
+    }
+    if (!line.trim()) { flush(); list = null; continue; }
+    list = null;
+    if (heading) { flush(); frag.append(el(`h${Math.min(heading[1].length + 2, 6)}`, {}, ...inline(heading[2]))); continue; }
+    para.push(line);
+  }
+  flush();
+  return frag;
+}
+
 function addBubble(role, text = "") {
   const bubble = el("div", { class: "bubble" }, text);
+  if (role === "assistant") setMarkdown(bubble, text);
   messagesEl().append(el("div", { class: `msg ${role}` }, bubble));
   scrollToBottom();
   return bubble;
+}
+
+// Assistant bubbles keep their raw text (streamed deltas are appended to it) and
+// are re-rendered from it.
+function setMarkdown(bubble, text) {
+  bubble.dataset.raw = text;
+  bubble.classList.add("md");
+  bubble.replaceChildren(renderMarkdown(text));
 }
 
 function addNote(text) {
@@ -475,7 +541,7 @@ async function runStream(path, body) {
         case "delta":
           hideStatus();
           if (!bubble) bubble = addBubble("assistant");
-          bubble.textContent += data.text;
+          setMarkdown(bubble, bubble.dataset.raw + data.text);
           scrollToBottom();
           break;
         case "tool_call":

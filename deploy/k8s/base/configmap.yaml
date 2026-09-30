@@ -12,3 +12,7 @@ data:
   AIP_PROVIDERS: '["anthropic"]'
   AIP_ADMIN_USERS: '[]'
   AIP_METRICS_PORT: "9090"
+  # Tracing to the self-hosted Langfuse, masked (see src/aiplatform/privacy.py).
+  LANGFUSE_TRACING_ENABLED: "true"
+  LANGFUSE_BASE_URL: http://langfuse-web.langfuse.svc.cluster.local:3000
+  AIP_TRACE_MASK_AMOUNTS: "true"

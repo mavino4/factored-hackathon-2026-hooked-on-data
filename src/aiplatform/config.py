@@ -1,5 +1,6 @@
 """Runtime settings, loaded from environment variables (prefix ``AIP_``)."""
 
+import secrets
 from functools import lru_cache
 from typing import Literal
 
@@ -68,6 +69,22 @@ class Settings(BaseSettings):
     user_requests_per_minute: int = 20
     user_tokens_per_day: int = 500_000
 
+    # Langfuse tracing of chat and agent runs, masked before sending (tracing.py, privacy.py).
+    # Uses the standard LANGFUSE_* names. Point it at the self-hosted server (deploy/langfuse).
+    langfuse_enabled: bool = Field(default=False, validation_alias=AliasChoices(
+        "AIP_LANGFUSE_ENABLED", "LANGFUSE_TRACING_ENABLED"))
+    langfuse_host: str = Field(default="http://localhost:3000", validation_alias=AliasChoices(
+        "AIP_LANGFUSE_HOST", "LANGFUSE_BASE_URL", "LANGFUSE_HOST"))
+    langfuse_public_key: str | None = Field(default=None, validation_alias=AliasChoices(
+        "AIP_LANGFUSE_PUBLIC_KEY", "LANGFUSE_PUBLIC_KEY"))
+    langfuse_secret_key: SecretStr | None = Field(default=None, validation_alias=AliasChoices(
+        "AIP_LANGFUSE_SECRET_KEY", "LANGFUSE_SECRET_KEY"))
+    # Mask balances, limits and amounts in traces. Turn off (dev only) to debug figures.
+    trace_mask_amounts: bool = True
+    # Key for the user-ID hash in traces (stable pseudonyms). Required in production when
+    # tracing is on; in dev an unset key gets a random one per process.
+    trace_hash_key: SecretStr | None = None
+
 
     @model_validator(mode="after")
     def _check_auth(self) -> "Settings":
@@ -76,6 +93,10 @@ class Settings(BaseSettings):
         if self.auth_mode == "oidc" and not (self.oidc_issuer and self.oidc_audience):
             raise ValueError("AIP_AUTH_MODE=oidc needs AIP_OIDC_ISSUER and AIP_OIDC_AUDIENCE "
                              "(or set AIP_AUTH_MODE=dev for local development)")
+        if self.langfuse_enabled and self.trace_hash_key is None:
+            if self.env == "production":
+                raise ValueError("Langfuse tracing needs AIP_TRACE_HASH_KEY in production")
+            self.trace_hash_key = SecretStr(secrets.token_hex(32))
         return self
 
 

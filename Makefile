@@ -1,4 +1,4 @@
-.PHONY: check lint test test-postgres smoke eval eval-banking banking-cases compare-models bank-db run migrate docker-build lan
+.PHONY: check lint test test-postgres smoke eval eval-banking banking-cases compare-models bank-db run migrate docker-build lan langfuse-env langfuse-up langfuse-down
 
 check: lint test
 
@@ -44,3 +44,12 @@ docker-build:
 lan:  # web UI for other devices on a trusted LAN (dev login, local Ollama); see docker-compose.lan.yml
 	docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d --build
 	@echo "Open http://$$(hostname -I | cut -d' ' -f1):8000 from another device on this network"
+
+langfuse-env:  # once: deploy/langfuse/.env with random secrets and the project API keys
+	./deploy/langfuse/gen-env.sh
+
+langfuse-up:  # self-hosted Langfuse (tracing UI) on http://localhost:3000
+	docker compose -f deploy/langfuse/docker-compose.yml --env-file deploy/langfuse/.env up -d
+
+langfuse-down:
+	docker compose -f deploy/langfuse/docker-compose.yml --env-file deploy/langfuse/.env down

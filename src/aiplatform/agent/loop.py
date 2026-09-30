@@ -32,18 +32,20 @@ from aiplatform.chat.prompts import reply_language
 from aiplatform.chat.repository import Conversation, ConversationRepository
 from aiplatform.graph_stream import stream_graph
 from aiplatform.llm.gateway import AIGateway
+from aiplatform.tracing import Tracing, run_config
 from aiplatform.usage import UsageStore
 
 
 class AgentRunner:
     def __init__(self, gateway: AIGateway, repo: ConversationRepository, usage: UsageStore,
                  inflight: InFlight, actions: ActionStore, tools: list[Tool], *,
-                 max_iterations: int = 8):
+                 max_iterations: int = 8, tracing: Tracing | None = None):
         self._gateway = gateway
         self._repo = repo
         self._usage = usage
         self._inflight = inflight
         self._actions = actions
+        self._tracing = tracing
         self._graph = build_agent_graph(
             gateway=gateway, repo=repo, usage=usage, actions=actions,
             tools={t.name: t for t in tools}, max_iterations=max_iterations)
@@ -70,5 +72,8 @@ class AgentRunner:
     async def _stream(self, user_id: str, conv: Conversation, language: str | None,
                       decision: Decision | None = None) -> AsyncIterator[AgentEvent]:
         state = initial_state(user_id, conv, reply_language(language), decision)
-        async for event in stream_graph(self._graph, state, self._config):
+        config = {**self._config, **run_config(
+            "agent", user_id=user_id, conversation_id=conv.id, language=language,
+            decision=decision._asdict() if decision else None)}
+        async for event in stream_graph(self._graph, state, config, self._tracing):
             yield event

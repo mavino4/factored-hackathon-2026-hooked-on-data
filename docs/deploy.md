@@ -120,3 +120,30 @@ Also watch pod CPU/memory and the HPA replica count.
 - Database: connections, slow queries, storage growth, backup success.
 
 Suggested alerts: 5xx > 2% for 5 min, p95 `aip_llm_time_to_first_token_seconds` > 10 s for 10 min, provider error rate > 10%, `aip_llm_breaker_open == 1`, daily cost above budget, readiness failures, and failed backups.
+
+## 7. Tracing (Langfuse)
+
+Each chat or agent turn is sent as one trace to a **self-hosted Langfuse**: the graph steps, every model call (prompt, reply, tokens, provider, retry attempt) and every tool call. Traces are grouped by conversation (Langfuse **Sessions**). The data is masked before it leaves the app (`src/aiplatform/privacy.py`):
+
+| What | Becomes |
+|---|---|
+| First name, city, card/account last 4 digits (tool fields, and the same values anywhere later in the run, e.g. in the model's reply) | `<NAME>`, `<CITY>`, `<LAST4>` |
+| Balances, limits, available credit, money amounts in text | `<AMOUNT>` (turn off with `AIP_TRACE_MASK_AMOUNTS=false`, dev only) |
+| Cards (Luhn-checked), CPF, CNPJ, DNI, RUT, IBAN, CBU/CLABE and other 8+ digit runs, emails, phones | `<CARD>`, `<CPF>`, …, `<ID>`, `<EMAIL>`, `<PHONE>` |
+| User ID (OIDC `sub`) | `u_<keyed hash>`: stable per customer, not reversible without `AIP_TRACE_HASH_KEY` |
+
+Product types, currencies, status, segment, interest rates and days past due stay visible for debugging. Masking is pattern-based: a name the customer types in free text, in a message where no tool returned it, is not caught. That's why the Langfuse UI is internal only.
+
+**Kubernetes** (`deploy/langfuse/values.yaml`, official chart `langfuse/langfuse` v2, Langfuse v4):
+
+1. Once per cluster: cert-manager and the ClickHouse operator (chart requirement, Kubernetes 1.28+). See the [chart README](https://github.com/langfuse/langfuse-k8s#prerequisites).
+2. Create the `langfuse-secrets` Secret with every key referenced in `values.yaml` (`salt`, `encryption-key`, `nextauth-secret`, `oidc-client-secret`, `postgres-password`, `clickhouse-password`, `redis-password` and `default` (the same Redis password, for the Valkey ACL user), `s3-access-key-id`, `s3-secret-access-key`). Keep `salt` and `encryption-key` stable: rotating them breaks the stored API keys and encrypted data.
+3. Fill in the `CHANGEME` values, then run `helm install langfuse langfuse/langfuse --version 2.1.3 -n langfuse --create-namespace -f deploy/langfuse/values.yaml`.
+4. In the Langfuse UI: create the `aiplatform` project and its API keys. Put them in `aiplatform-secrets` (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`), along with `AIP_TRACE_HASH_KEY` (`openssl rand -hex 32`). With tracing on in production, the app refuses to start without it.
+5. The app's NetworkPolicy already allows egress to the `langfuse` namespace on port 3000, and the ConfigMap points `LANGFUSE_BASE_URL` at `langfuse-web.langfuse.svc`.
+
+**Operations:**
+- **Backups:** Postgres (users, projects, API keys) through the managed database. ClickHouse holds the traces: back it up (the ClickHouse `BACKUP` command to object storage) or accept losing trace history.
+- **Size:** at 6,000–10,000 messages/day, expect on the order of 0.5–1 GB/day of raw trace data (each agent step carries the masked history), a few times less after ClickHouse compression. Measure after the first week and set a retention period that matches your data policy.
+- If the Langfuse server is down, the app keeps serving: spans are batched and sent in the background, and failed exports are dropped, never retried into the request path.
+- **Local and single-host:** `make langfuse-env && make langfuse-up` (see `deploy/langfuse/docker-compose.yml`).
