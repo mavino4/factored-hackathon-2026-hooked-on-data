@@ -75,7 +75,7 @@ OPUS_5 = ModelProfile(
 
 @dataclass(frozen=True)
 class Route:
-    """How one kind of traffic (chat, agent, ...) calls the model."""
+    """How one kind of traffic (classify, agent, ...) calls the model."""
 
     name: str
     model: ModelProfile
@@ -88,7 +88,8 @@ class Route:
 # First versions run on the light model (Claude Haiku 4.5). To upgrade a route,
 # swap the model, e.g. Route("agent", OPUS_5, max_tokens=16_000, effort="high").
 ROUTES: dict[str, Route] = {
-    "chat": Route("chat", HAIKU_4_5, max_tokens=4_096),
+    # Short, forced tool call that classifies the customer's intent before the agent.
+    "classify": Route("classify", HAIKU_4_5, max_tokens=300),
     "agent": Route("agent", HAIKU_4_5, max_tokens=8_192, first_event_timeout_s=60.0),
 }
 

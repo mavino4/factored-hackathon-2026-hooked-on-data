@@ -10,9 +10,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from aiplatform.agent.actions import ActionNotPending, PendingAction
+from aiplatform.agent.handoffs import Handoff, HandoffNotFound, Reason, Status
 from aiplatform.chat.inflight import ConversationBusy
 from aiplatform.chat.repository import Conversation, ConversationNotFound, Kind, title_from
-from aiplatform.storage.tables import conversations, messages, pending_actions, usage_events
+from aiplatform.storage.tables import (
+    conversations,
+    handoffs,
+    messages,
+    pending_actions,
+    usage_events,
+)
 from aiplatform.usage import UsageEvent, utc_day_start
 
 
@@ -25,6 +32,13 @@ def create_engine(url: str) -> AsyncEngine:
 def _as_utc(value: datetime) -> datetime:
     # SQLite returns naive datetimes; everything we store is UTC.
     return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _row_to_message(row) -> dict:
+    message = {"role": row.role, "content": row.content}
+    if row.author:
+        message["author"] = row.author
+    return message
 
 
 def _row_to_conversation(row) -> Conversation:
@@ -58,10 +72,10 @@ class SqlConversationRepository:
                 raise ConversationNotFound(conversation_id)
             conv = _row_to_conversation(row)
             result = await db.execute(
-                sa.select(messages.c.role, messages.c.content)
+                sa.select(messages.c.role, messages.c.content, messages.c.author)
                 .where(messages.c.conversation_id == conversation_id)
                 .order_by(messages.c.seq))
-            conv.messages = [{"role": r.role, "content": r.content} for r in result]
+            conv.messages = [_row_to_message(r) for r in result]
         return conv
 
     async def append(self, conv: Conversation, message: dict) -> None:
@@ -73,7 +87,8 @@ class SqlConversationRepository:
             async with self._engine.begin() as db:
                 await db.execute(messages.insert().values(
                     conversation_id=conv.id, seq=len(conv.messages), role=message["role"],
-                    content=message["content"], created_at=now))
+                    content=message["content"], author=message.get("author"),
+                    created_at=now))
                 await db.execute(conversations.update()
                                  .where(conversations.c.id == conv.id).values(**values))
         except IntegrityError as exc:
@@ -186,3 +201,77 @@ class SqlActionStore:
             row = (await db.execute(
                 sa.select(pending_actions).where(pending_actions.c.id == action_id))).one()
         return _row_to_action(row)
+
+
+def _row_to_handoff(row) -> Handoff:
+    return Handoff(id=str(row.id), conversation_id=str(row.conversation_id),
+                   user_id=row.user_id, status=row.status, reason=row.reason,
+                   summary=row.summary, message_index=row.message_index,
+                   created_at=_as_utc(row.created_at),
+                   closed_at=_as_utc(row.closed_at) if row.closed_at else None)
+
+
+class SqlHandoffStore:
+    def __init__(self, engine: AsyncEngine):
+        self._engine = engine
+
+    async def create(self, *, conversation_id: str, user_id: str, status: Status,
+                     reason: Reason, summary: str, message_index: int) -> Handoff:
+        handoff = Handoff(id=str(uuid.uuid4()), conversation_id=conversation_id,
+                          user_id=user_id, status=status, reason=reason, summary=summary,
+                          message_index=message_index, created_at=datetime.now(UTC))
+        async with self._engine.begin() as db:
+            await db.execute(handoffs.insert().values(
+                id=handoff.id, conversation_id=conversation_id, user_id=user_id,
+                status=status, reason=reason, summary=summary, message_index=message_index,
+                created_at=handoff.created_at))
+        return handoff
+
+    async def latest(self, conversation_id: str) -> Handoff | None:
+        async with self._engine.connect() as db:
+            row = (await db.execute(
+                sa.select(handoffs).where(handoffs.c.conversation_id == conversation_id)
+                .order_by(handoffs.c.created_at.desc()).limit(1))).first()
+        return _row_to_handoff(row) if row else None
+
+    async def get(self, handoff_id: str) -> Handoff:
+        try:
+            uuid.UUID(handoff_id)
+        except ValueError:
+            raise HandoffNotFound(handoff_id) from None
+        async with self._engine.connect() as db:
+            row = (await db.execute(
+                sa.select(handoffs).where(handoffs.c.id == handoff_id))).first()
+        if row is None:
+            raise HandoffNotFound(handoff_id)
+        return _row_to_handoff(row)
+
+    async def list(self, status: Status | None = None, limit: int = 100) -> list[Handoff]:
+        query = sa.select(handoffs).order_by(handoffs.c.created_at).limit(limit)
+        if status is not None:
+            query = query.where(handoffs.c.status == status)
+        async with self._engine.connect() as db:
+            return [_row_to_handoff(r) for r in await db.execute(query)]
+
+    async def transition(self, handoff_id: str, *, expected: Status, to: Status,
+                         conversation_id: str | None = None,
+                         user_id: str | None = None) -> Handoff:
+        try:
+            uuid.UUID(handoff_id)
+        except ValueError:
+            raise HandoffNotFound(handoff_id) from None
+        where = [handoffs.c.id == handoff_id, handoffs.c.status == expected]
+        if conversation_id is not None:
+            where.append(handoffs.c.conversation_id == conversation_id)
+        if user_id is not None:
+            where.append(handoffs.c.user_id == user_id)
+        values: dict = {"status": to}
+        if to in ("closed", "declined"):
+            values["closed_at"] = datetime.now(UTC)
+        async with self._engine.begin() as db:
+            result = await db.execute(handoffs.update().where(*where).values(**values))
+            if result.rowcount != 1:
+                raise HandoffNotFound(handoff_id)
+            row = (await db.execute(
+                sa.select(handoffs).where(handoffs.c.id == handoff_id))).one()
+        return _row_to_handoff(row)

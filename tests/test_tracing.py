@@ -11,12 +11,11 @@ from aiplatform.agent.loop import AgentRunner
 from aiplatform.agent.tools import Tool
 from aiplatform.chat.inflight import InFlight
 from aiplatform.chat.repository import InMemoryConversationRepository
-from aiplatform.chat.service import ChatService
 from aiplatform.config import Settings
 from aiplatform.llm.gateway import AIGateway
 from aiplatform.tracing import Tracing
 from aiplatform.usage import InMemoryUsageStore
-from tests.fakes import FakeClient, text_reply
+from tests.fakes import FakeClient
 from tests.test_agent import collect, final, tool_call
 
 USER = "auth0|customer-42"
@@ -51,7 +50,7 @@ def traced(request):
         client.flush()
         return list(exporter.get_finished_spans())
 
-    return Tracing(client, masker, key), masker, spans
+    return Tracing(client, masker), masker, spans
 
 
 def settings() -> Settings:
@@ -112,16 +111,29 @@ async def test_failed_tool_is_an_error(traced):
     assert tool.attributes["langfuse.observation.status_message"] == "tool failed: RuntimeError"
 
 
-async def test_chat_run_is_traced(traced):
+async def test_steps_nest_their_model_calls_and_tools(traced):
+    """The tree reads step by step: classify -> its generation, call_model -> its
+    generation, run_tools -> its tool; no LangGraph routing helpers."""
     tracing, _, spans = traced
-    gw = AIGateway({"anthropic": FakeClient(text_reply("Hola"))}, settings())
-    repo = InMemoryConversationRepository()
-    conv = await repo.create(USER, "chat")
-    chat = ChatService(gw, repo, InMemoryUsageStore(), InFlight(), tracing)
-    await collect(chat.send(USER, conv.id, "hi"))
-    sent = by_name(spans())
-    assert sent["chat"].attributes["session.id"] == conv.id
-    assert sent["chat.anthropic"].context.trace_id == sent["chat"].context.trace_id
+    await agent_run(tracing, tool_call("get_customer_profile", {}), final("Listo."))
+    sent = spans()
+    by_id = {s.context.span_id: s for s in sent}
+
+    def parent(span) -> str:
+        return by_id[span.parent.span_id].name
+
+    root = by_name(sent)["agent"]
+    steps = [s for s in sent if s.parent and s.parent.span_id == root.context.span_id]
+    assert [s.name for s in sorted(steps, key=lambda s: s.start_time)] == [
+        "classify", "call_model", "run_tools", "call_model", "finish"]
+    assert parent(by_name(sent)["classify.anthropic"]) == "classify"
+    assert all(parent(s) == "call_model" for s in sent if s.name == "agent.anthropic")
+    assert parent(by_name(sent)["get_customer_profile"]) == "run_tools"
+    assert not {"__start__", "start", "after_model", "next_call"} & {s.name for s in sent}
+    # The root's input is the customer's message (masked); steps carry short inputs.
+    assert "<EMAIL>" in root.attributes["langfuse.observation.input"]
+    assert json.loads(by_name(sent)["classify"].attributes["langfuse.observation.output"])[
+        "intent"]["name"] == "account"
 
 
 async def test_runs_do_not_share_sensitive_values(traced):

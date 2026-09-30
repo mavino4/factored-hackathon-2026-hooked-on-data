@@ -142,7 +142,7 @@ def test_api_requires_a_valid_bearer_token(idp):
         assert bad.status_code == 401 and "invalid_token" in bad.headers["www-authenticate"]
 
         ok = {"Authorization": f"Bearer {idp.token()}"}
-        cid = http.post("/v1/conversations", json={"kind": "chat"}, headers=ok).json()["id"]
+        cid = http.post("/v1/conversations", json={}, headers=ok).json()["id"]
         assert http.get(f"/v1/conversations/{cid}", headers=ok).status_code == 200
 
 
@@ -150,6 +150,6 @@ def test_users_are_isolated_by_token_subject(idp):
     with oidc_client(idp) as http:
         alice = {"Authorization": f"Bearer {idp.token(sub='alice')}"}
         bob = {"Authorization": f"Bearer {idp.token(sub='bob')}"}
-        cid = http.post("/v1/conversations", json={"kind": "chat"}, headers=alice).json()["id"]
+        cid = http.post("/v1/conversations", json={}, headers=alice).json()["id"]
         assert http.get(f"/v1/conversations/{cid}", headers=bob).status_code == 404
         assert http.get("/v1/conversations", headers=bob).json()["conversations"] == []

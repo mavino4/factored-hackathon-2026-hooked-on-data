@@ -1,6 +1,7 @@
 # AI Platform (v1)
 
-A streaming chat assistant and tool-using agent, built with Python, FastAPI and the Anthropic SDK.
+A streaming banking assistant (one tool-using agent that first classifies each message, with a
+human handoff), built with Python, FastAPI and the Anthropic SDK.
 The first versions run on the light model, **Claude Haiku 4.5**.
 
 - Architecture and growth path: [`docs/architecture/README.md`](docs/architecture/README.md)
@@ -14,11 +15,12 @@ src/aiplatform/
   llm/models.py      model profiles + per-route config  <- change models here
   llm/gateway.py     AI Gateway: retries, circuit breaker, failover, cache breakpoints
   llm/providers.py   Claude API / Bedrock / Vertex clients
-  chat/              conversations (append-only) and streamed chat turns (LangGraph)
+  chat/              conversations (append-only), history rules and prompts
   storage/           Postgres/SQL schema + repository and usage store
   usage.py           token usage events and the daily token quota
   auth.py            OIDC access-token (JWT) verification
-  agent/             tool registry and the agent tool loop (LangGraph graph)
+  agent/             the agent graph (LangGraph): intent classification, tool loop,
+                     approvals and human handoffs
   api/app.py         HTTP API (SSE streaming) + serves the web UI
   web/               web chat UI (plain HTML/CSS/JS, no build step)
 migrations/          Alembic migrations (must match storage/tables.py)
@@ -51,9 +53,13 @@ AIP_PROVIDERS='["ollama"]' uv run python scripts/smoke.py
 ### Web UI
 
 Open http://localhost:8000 (from `make run` or `docker compose up`).
-- Chat with streamed replies, a conversation list, and history that survives reloads.
-- Agent tasks show each tool call. Actions that change something show an **approval card**
-  (Approve or Reject) and run only after approval.
+- One button, **+ Nueva consulta**: streamed replies, a conversation list, and history that
+  survives reloads. General questions and questions about the customer's own products go
+  through the same agent.
+- Progress shows while the agent consults the bank. Actions that change something show an
+  **approval card** (Approve or Reject) and run only after approval.
+- If the customer insists without being resolved, BankBot offers an advisor (Yes / No card).
+  While an advisor attends the conversation, their messages show with an "Asesor" label.
 - Sign-in follows `AIP_AUTH_MODE`: a username field in `dev` mode, or the provider's login page
   in `oidc` mode (authorization code + PKCE).
 
@@ -116,18 +122,45 @@ doesn't expose Ollama on your LAN.
 Against your own Postgres: set `AIP_DATABASE_URL=postgresql+asyncpg://...`, then `make migrate && make run`.
 
 ```bash
-# create a chat conversation and stream a reply
+# create a conversation (a "consulta") and stream a reply
 CID=$(curl -s localhost:8000/v1/conversations -H 'X-User-Id: demo' \
-      -H 'content-type: application/json' -d '{"kind":"chat"}' | jq -r .id)
-curl -N localhost:8000/v1/conversations/$CID/messages -H 'X-User-Id: demo' \
-     -H 'content-type: application/json' -d '{"text":"Hello!"}'
-
-# agent run
-AID=$(curl -s localhost:8000/v1/conversations -H 'X-User-Id: demo' \
-      -H 'content-type: application/json' -d '{"kind":"agent"}' | jq -r .id)
-curl -s localhost:8000/v1/conversations/$AID/agent-runs -H 'X-User-Id: demo' \
-     -H 'content-type: application/json' -d '{"text":"What time is it in UTC?"}'
+      -H 'content-type: application/json' -d '{}' | jq -r .id)
+curl -N localhost:8000/v1/conversations/$CID/agent-runs -H 'X-User-Id: demo' \
+     -H 'content-type: application/json' -d '{"text":"¿Qué es el cupo disponible?"}'
 ```
+
+### How a message is handled
+
+Every message goes through one LangGraph graph (`agent/graph.py`):
+
+1. **classify**: a short model call with a forced tool (`classify_intent`, route `classify`)
+   decides the intent: `account` (the customer's own data: uses the tools), `general`
+   (banking knowledge: no tools), `out_of_scope` (transfers, payments, complaints...: a
+   polite answer, no tools) or `human` (asks for a person). It also flags **insistence**
+   (repeating an unresolved request, frustration); three nearly identical messages in a row
+   count as insistence too. If the classifier fails, the full agent with tools answers.
+2. **call_model / run_tools**: the tool loop (only `account` gets the tool definitions).
+3. **handoff**: `human` queues the conversation for an advisor; insistence makes BankBot
+   *offer* an advisor instead (the customer accepts or declines; no new offer for 3 turns
+   after declining).
+
+While an advisor attends a conversation, the bot doesn't answer: messages are stored and
+the advisor replies through the operator API. Closing the case gives it back to the bot.
+
+### Operator API (human handoff)
+
+For users in `AIP_ADMIN_USERS` (there is no operator screen yet):
+
+```bash
+OP=(-H 'X-User-Id: operador' -H 'content-type: application/json')   # dev mode
+curl -s "localhost:8000/v1/admin/handoffs?status=open" "${OP[@]}"      # the queue
+curl -s localhost:8000/v1/admin/handoffs/$HID "${OP[@]}"               # the conversation
+curl -s localhost:8000/v1/admin/handoffs/$HID/messages "${OP[@]}" -d '{"text":"Hola, soy Laura."}'
+curl -s -X POST localhost:8000/v1/admin/handoffs/$HID/close "${OP[@]}" # back to the bot
+```
+
+The customer answers an offer with `POST /v1/conversations/{id}/handoff`
+(`{"handoff_id": "...", "accept": true}`); the web UI does it from the offer card.
 
 ## Test
 
@@ -142,7 +175,7 @@ make test-postgres            # same storage tests against real Postgres (see ab
 - Prometheus metrics on the internal port `AIP_METRICS_PORT` (default 9090), including time-to-first-token, tokens, estimated cost, provider errors and breaker state. See [`docs/deploy.md`](docs/deploy.md#6-what-to-monitor).
 - `GET /readyz` checks the database; `GET /healthz` is liveness only.
 - `GET /v1/admin/usage?days=7` gives a daily usage and cost report, for users listed in `AIP_ADMIN_USERS`.
-- **Tracing (self-hosted Langfuse, masked)**, off by default. Each chat or agent run is one trace: the graph steps, every model call (prompt, reply, tokens, provider, retry attempt) and every tool call (input, output, errors). Traces are grouped by conversation in Langfuse's **Sessions** view. Customer data is masked before it leaves the app: names, cities, last 4 digits, amounts, document and account numbers, emails, phones and user IDs (hashed). See [`docs/deploy.md`](docs/deploy.md#7-tracing-langfuse). To run it locally:
+- **Tracing (self-hosted Langfuse, masked)**, off by default. Each turn is one trace: one span per graph step (classify, call_model, run_tools, handoff...), and under each step its model calls (prompt, reply, tokens, provider, retry attempt) and every tool call (input, output, errors). Traces are grouped by conversation in Langfuse's **Sessions** view. Customer data is masked before it leaves the app: names, cities, last 4 digits, amounts, document and account numbers, emails, phones and user IDs (hashed). See [`docs/deploy.md`](docs/deploy.md#7-tracing-langfuse). To run it locally:
 
   ```bash
   make langfuse-env   # once: deploy/langfuse/.env with random secrets; prints the app settings

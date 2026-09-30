@@ -29,7 +29,7 @@ os.environ.setdefault("AIP_AUTH_MODE", "dev")
 from aiplatform.agent.tools import Tool, ToolContext
 from aiplatform.banking.repository import PostgresBankRepository
 from aiplatform.banking.tools import make_bank_tools
-from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT, reply_language
+from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, reply_language
 from aiplatform.config import get_settings
 from aiplatform.llm.gateway import AIGateway
 from aiplatform.llm.models import ROUTES, prices_for
@@ -247,8 +247,10 @@ def text_of(message) -> str:
 
 
 async def run_chat(gateway: AIGateway, case: Case, usage: Usage) -> Answer:
+    """A general question: the agent's path when the classifier needs no tools (same
+    prompt, no tool definitions)."""
     messages = [*case.history, {"role": "user", "content": case.input}]
-    completed = await gateway.complete(ROUTES["chat"], system=CHAT_SYSTEM_PROMPT,
+    completed = await gateway.complete(ROUTES["agent"], system=AGENT_SYSTEM_PROMPT,
                                        messages=messages,
                                        system_suffix=reply_language(case.ui_language))
     usage.add(completed.message)
@@ -308,7 +310,7 @@ async def run_agent(gateway: AIGateway, case: Case, usage: Usage,
 async def judge(gateway: AIGateway, case: Case, answer: Answer, usage: Usage) -> dict:
     prompt = (f"Question:\n{case.input}\n\nAnswer:\n{answer.text}\n\n"
               f"Rubric:\n{case.rubric}\n\nReply with only the JSON object.")
-    completed = await gateway.complete(ROUTES["chat"], system=JUDGE_SYSTEM,
+    completed = await gateway.complete(ROUTES["agent"], system=JUDGE_SYSTEM,
                                        messages=[{"role": "user", "content": prompt}])
     usage.add(completed.message)
     return parse_judge(text_of(completed.message))
@@ -405,7 +407,7 @@ async def run_dataset(settings, cases: list[Case], use_judge: bool = False,
     tools = make_bank_tools(bank) if bank else GENERAL_TOOLS
     try:
         if warm_up:  # load a local model onto the GPU before timing anything
-            await gateway.complete(ROUTES["chat"], system="Reply OK.",
+            await gateway.complete(ROUTES["agent"], system="Reply OK.",
                                    messages=[{"role": "user", "content": "OK"}])
         return [await run_case(gateway, case, use_judge, tools) for case in cases]
     finally:

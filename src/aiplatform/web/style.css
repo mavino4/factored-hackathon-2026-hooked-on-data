@@ -183,7 +183,15 @@ button.icon { border: 0; background: none; font-size: 1.2rem; padding: .25rem .5
   margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .82rem;
   background: var(--panel); border-radius: 8px; padding: .5rem;
 }
-.approval .actions { display: flex; gap: .5rem; }
+.approval .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+/* Offer to talk to a human advisor: same card, calmer color than an approval. */
+.approval.handoff { border-color: var(--tool-text); background: var(--tool); }
+/* Messages written by a human advisor. */
+.msg.advisor .bubble { border-left: 3px solid var(--tool-text); }
+.msg.advisor .author {
+  display: block; font-size: .75rem; font-weight: 600; color: var(--tool-text);
+  margin-bottom: .2rem;
+}
 .error-box {
   background: var(--error-bg); color: var(--error); border-radius: var(--radius);
   padding: .6rem .85rem; display: flex; gap: .75rem; align-items: center; justify-content: space-between;

@@ -57,21 +57,27 @@ class StreamInterrupted(GatewayError):
 
 def build_params(route: Route, provider: str, *, system: str, messages: list[dict],
                  tools: list[dict] | None, model: str | None = None,
-                 system_suffix: str | None = None) -> dict[str, Any]:
+                 system_suffix: str | None = None,
+                 tool_choice: dict | None = None) -> dict[str, Any]:
     params: dict[str, Any] = {
         "model": model or route.model.id_for(provider),
         "max_tokens": route.max_tokens,
         # Breakpoint 1: the frozen system prompt (and the tools, which render before it).
         "system": [{"type": "text", "text": system, "cache_control": CACHE}],
         # Breakpoint 2: the end of the conversation, so the next turn reads it from cache.
-        "messages": _with_tail_breakpoint(messages),
+        # Stored messages may carry app-only keys (e.g. "author"); the API gets role/content.
+        "messages": _with_tail_breakpoint(
+            [{"role": m["role"], "content": m["content"]} for m in messages]),
     }
     if system_suffix:  # per-request text (e.g. reply language), after the cached prefix
         params["system"].append({"type": "text", "text": system_suffix})
     if tools:
         # Deterministic order: any change in the tool list invalidates the whole cache.
         params["tools"] = sorted(tools, key=lambda t: t["name"])
-    if route.model.supports_effort and model is None:
+    if tool_choice:
+        params["tool_choice"] = tool_choice
+    # A forced tool choice can't be combined with thinking.
+    if route.model.supports_effort and model is None and not tool_choice:
         params["thinking"] = {"type": "adaptive"}
         if route.effort:
             params["output_config"] = {"effort": route.effort}
@@ -128,7 +134,8 @@ class AIGateway:
     async def stream(self, route: Route, *, system: str, messages: list[dict],
                      tools: list[dict] | None = None,
                      conversation_id: str | None = None,
-                     system_suffix: str | None = None) -> AsyncIterator[TextDelta | Completed]:
+                     system_suffix: str | None = None,
+                     tool_choice: dict | None = None) -> AsyncIterator[TextDelta | Completed]:
         """Stream one model turn. Yields text deltas, then exactly one ``Completed``."""
         last_error: BaseException | None = None
         for provider in self._provider_order(conversation_id):
@@ -136,7 +143,7 @@ class AIGateway:
             breaker = self._breakers[provider]
             params = build_params(route, provider, system=system, messages=messages, tools=tools,
                                   model=self._model_overrides.get(provider),
-                                  system_suffix=system_suffix)
+                                  system_suffix=system_suffix, tool_choice=tool_choice)
             for attempt in range(self._settings.max_attempts_per_provider):
                 if not breaker.acquire():
                     break

@@ -8,10 +8,14 @@ const state = {
   auth: null,          // {header: {...}, user: "name"}
   me: null,            // {user_id, first_name} for the greeting
   conversations: [],
-  current: null,       // {id, kind, title}
+  current: null,       // {id, title, seen: messages rendered}
   draft: false,        // welcome view: a new query not saved until the first message
   busy: false,
+  poll: null,          // timer while an advisor attends the conversation
 };
+
+// While an advisor attends a conversation, check for their replies this often.
+const ADVISOR_POLL_MS = 5000;
 
 // Most common questions (from the Datathon call transcripts), one click away.
 const QUICK_ACTIONS = ["qa_card_balance", "qa_savings_balance", "qa_available", "qa_overdue",
@@ -166,9 +170,8 @@ async function logout() {
 // Remove every trace of the previous conversation and user from the page.
 function resetView() {
   $("conversation-list").replaceChildren();
+  stopPolling();
   $("chat-title").textContent = t("start");
-  $("chat-kind").hidden = true;
-  $("chat-kind").textContent = "";
   $("user-name").textContent = "";
   $("input").value = "";
   messagesEl().replaceChildren(el("div", { class: "empty muted" }, t("empty_state")));
@@ -386,9 +389,66 @@ function addApprovalCard(action) {
   scrollToBottom();
 }
 
-// Render stored history: only what the customer said and BankBot answered.
-// Tool calls and their results stay behind the scenes.
-function renderHistory(messages, pendingActions) {
+// Offered when the customer insists without being resolved: talk to a human advisor?
+function addHandoffOffer(handoffId) {
+  const card = el("div", { class: "approval handoff", "data-open": "" },
+    el("strong", {}, t("handoff_offer_title")),
+    el("span", {}, t("handoff_offer_text")));
+  const yes = el("button", { class: "primary" }, t("handoff_yes"));
+  const no = el("button", {}, t("handoff_no"));
+  yes.disabled = no.disabled = state.busy;
+  const answer = guard(async (accept) => {
+    if (state.busy) return;
+    card.removeAttribute("data-open");
+    yes.disabled = no.disabled = true;
+    const conversationId = state.current.id;
+    await api(`/v1/conversations/${conversationId}/handoff`, {
+      method: "POST", body: { handoff_id: handoffId, accept, language: LANG } });
+    if (accept) await openConversation(conversationId);  // shows the advisor mode
+    else card.append(el("span", { class: "muted" }, t("handoff_declined")));
+  });
+  yes.addEventListener("click", () => answer(true));
+  no.addEventListener("click", () => answer(false));
+  card.append(el("div", { class: "actions" }, yes, no));
+  messagesEl().append(card);
+  scrollToBottom();
+}
+
+// A message written by a human advisor, labeled as such.
+function addAdvisorBubble(text) {
+  const bubble = addBubble("assistant", text);
+  bubble.parentElement.classList.add("advisor");
+  bubble.prepend(el("span", { class: "author" }, t("advisor")));
+  return bubble;
+}
+
+// While an advisor attends the conversation, reload it to show their replies.
+function startPolling() {
+  if (state.poll || !state.current) return;
+  const id = state.current.id;
+  state.poll = setInterval(async () => {
+    if (!state.current || state.current.id !== id) return stopPolling();
+    if (state.busy) return;
+    try {
+      const conv = await (await api(`/v1/conversations/${id}`)).json();
+      if (!state.current || state.current.id !== id || state.busy) return;
+      if (conv.messages.length !== state.current.seen) {
+        renderHistory(conv.messages, conv.pending_actions, conv.handoff);
+        state.current.seen = conv.messages.length;
+      }
+      if (!conv.handoff || conv.handoff.status !== "open") stopPolling();
+    } catch { /* keep trying on the next tick */ }
+  }, ADVISOR_POLL_MS);
+}
+
+function stopPolling() {
+  clearInterval(state.poll);
+  state.poll = null;
+}
+
+// Render stored history: only what the customer said and BankBot (or an advisor)
+// answered. Tool calls and their results stay behind the scenes.
+function renderHistory(messages, pendingActions, handoff) {
   const box = messagesEl();
   box.replaceChildren();
   for (const message of messages) {
@@ -406,21 +466,23 @@ function renderHistory(messages, pendingActions) {
     }
     const blocks = typeof content === "string" ? [{ type: "text", text: content }] : content;
     for (const block of blocks) {
-      if (block.type === "text" && block.text.trim()) addBubble("assistant", block.text);
+      if (block.type !== "text" || !block.text.trim()) continue;
+      if (message.author === "operator") addAdvisorBubble(block.text);
+      else addBubble("assistant", block.text);
     }
   }
   for (const action of pendingActions || []) addApprovalCard(action);
-  if (!messages.length) {
-    box.append(el("div", { class: "empty muted" },
-      state.current.kind === "agent"
-        ? t("empty_agent")
-        : t("empty_chat")));
+  if (handoff && handoff.status === "offered") addHandoffOffer(handoff.id);
+  if (handoff && handoff.status === "open") {
+    addNote(t("handoff_waiting"));
+    startPolling();
   }
+  if (!messages.length) box.append(el("div", { class: "empty muted" }, t("empty_agent")));
   scrollToBottom();
 }
 
-function defaultTitle(kind) {
-  return t(kind === "agent" ? "title_query" : "title_chat");
+function defaultTitle() {
+  return t("title_query");
 }
 
 function renderConversationList() {
@@ -428,8 +490,7 @@ function renderConversationList() {
   list.replaceChildren();
   for (const conv of state.conversations) {
     const button = el("button", { onclick: () => openConversation(conv.id) },
-      el("span", { class: "title" }, conv.title || defaultTitle(conv.kind)),
-      el("span", { class: "badge" }, t(conv.kind === "agent" ? "kind_agent" : "kind_chat")));
+      el("span", { class: "title" }, conv.title || defaultTitle()));
     if (state.current && state.current.id === conv.id) button.setAttribute("aria-current", "true");
     list.append(el("li", {}, button));
   }
@@ -437,9 +498,8 @@ function renderConversationList() {
 
 function setBusy(busy) {
   state.busy = busy;
-  $("new-chat").disabled = busy;
   $("new-agent").disabled = busy;
-  // Approval buttons wait until the current reply has finished streaming.
+  // Approval and advisor-offer buttons wait until the current reply has finished streaming.
   for (const button of document.querySelectorAll(".approval[data-open] button")) button.disabled = busy;
   for (const button of document.querySelectorAll(".quick-actions button")) button.disabled = busy;
   const disabled = busy || (!state.current && !state.draft);
@@ -467,27 +527,13 @@ async function openConversation(id) {
   } finally {
     setBusy(false);
   }
-  state.current = { id: conv.id, kind: conv.kind, title: conv.title };
+  stopPolling();
+  state.current = { id: conv.id, title: conv.title, seen: conv.messages.length };
   state.draft = false;
-  $("chat-title").textContent = conv.title || defaultTitle(conv.kind);
-  $("chat-kind").hidden = false;
-  $("chat-kind").textContent = t(conv.kind === "agent" ? "kind_agent" : "kind_chat");
-  renderHistory(conv.messages, conv.pending_actions);
+  $("chat-title").textContent = conv.title || defaultTitle();
+  renderHistory(conv.messages, conv.pending_actions, conv.handoff);
   renderConversationList();
   setBusy(false);
-}
-
-async function createConversation(kind) {
-  if (state.busy) return;
-  setBusy(true);
-  let conv;
-  try {
-    conv = await (await api("/v1/conversations", { method: "POST", body: { kind } })).json();
-  } finally {
-    setBusy(false);
-  }
-  state.conversations.unshift(conv);
-  await openConversation(conv.id);
 }
 
 // The welcome view: a new query with BankBot's greeting and quick actions. Nothing is
@@ -495,11 +541,10 @@ async function createConversation(kind) {
 function showWelcome() {
   if (state.busy) return;
   $("app").classList.remove("sidebar-open");
+  stopPolling();
   state.current = null;
   state.draft = true;
   $("chat-title").textContent = t("title_query");
-  $("chat-kind").hidden = false;
-  $("chat-kind").textContent = t("kind_agent");
   messagesEl().replaceChildren();
   const name = state.me && state.me.first_name;
   addBubble("assistant greeting", name ? t("greeting", { name }) : t("greeting_anon"));
@@ -521,14 +566,13 @@ function refreshLanguage() {
   if (state.draft) {
     showWelcome();
   } else if (state.current) {
-    $("chat-title").textContent = state.current.title || defaultTitle(state.current.kind);
-    $("chat-kind").textContent = t(state.current.kind === "agent" ? "kind_agent" : "kind_chat");
+    $("chat-title").textContent = state.current.title || defaultTitle();
   } else {
     $("chat-title").textContent = t("start");
   }
 }
 
-// Stream one reply (chat message, regenerate, agent run or approval decision).
+// Stream one reply (a message or an approval decision).
 async function runStream(path, body) {
   setBusy(true);
   let bubble = null;
@@ -555,6 +599,16 @@ async function runStream(path, body) {
           hideStatus();
           addApprovalCard(data);
           break;
+        case "handoff_offer":
+          hideStatus();
+          addHandoffOffer(data.handoff_id);
+          break;
+        case "handoff":  // the reply above says an advisor will take over
+        case "human_waiting":
+          hideStatus();
+          if (name === "human_waiting") addNote(t("handoff_waiting"));
+          startPolling();
+          break;
         case "refusal":
           hideStatus();
           addNote(data.message);
@@ -562,9 +616,7 @@ async function runStream(path, body) {
         case "error":
           hideStatus();
           failed = true;
-          addError(data.message, state.current.kind === "chat" && data.code !== "busy"
-            ? () => runStream(`/v1/conversations/${state.current.id}/regenerate`)
-            : null);
+          addError(data.message);
           break;
         case "done":
           break;
@@ -572,12 +624,12 @@ async function runStream(path, body) {
     });
   } catch (err) {
     failed = true;
-    addError(err.message || t("connection_lost"), state.current.kind === "chat"
-      ? () => runStream(`/v1/conversations/${state.current.id}/regenerate`) : null);
+    addError(err.message || t("connection_lost"));
   } finally {
     hideStatus();
     if (bubble && !bubble.textContent) bubble.parentElement.remove();
     setBusy(false);
+    if (state.current) state.current.seen = undefined;  // the next poll re-renders
     if (!failed) loadConversations().catch(() => {});  // refresh titles/order
   }
 }
@@ -598,11 +650,11 @@ async function sendText(text) {
     setBusy(true);
     let conv;
     try {
-      conv = await (await api("/v1/conversations", { method: "POST", body: { kind: "agent" } })).json();
+      conv = await (await api("/v1/conversations", { method: "POST", body: {} })).json();
     } finally {
       setBusy(false);
     }
-    state.current = { id: conv.id, kind: conv.kind, title: conv.title };
+    state.current = { id: conv.id, title: conv.title, seen: 0 };
     state.draft = false;
     state.conversations.unshift(conv);
     renderConversationList();
@@ -610,10 +662,7 @@ async function sendText(text) {
   messagesEl().querySelector(".empty")?.remove();
   messagesEl().querySelector(".quick-actions")?.remove();
   addBubble("user", text);
-  const path = state.current.kind === "agent"
-    ? `/v1/conversations/${state.current.id}/agent-runs`
-    : `/v1/conversations/${state.current.id}/messages`;
-  await runStream(path, { text });
+  await runStream(`/v1/conversations/${state.current.id}/agent-runs`, { text });
 }
 
 function autoResize() {
@@ -661,7 +710,6 @@ async function boot() {
   });
   $("oidc-login").addEventListener("click", () => startOidcLogin().catch((err) => showLogin(err.message)));
   $("logout").addEventListener("click", () => { logout(); });
-  $("new-chat").addEventListener("click", guard(() => createConversation("chat")));
   $("new-agent").addEventListener("click", guard(() => showWelcome()));
   for (const select of document.querySelectorAll("select.lang-select")) {
     select.value = LANG;

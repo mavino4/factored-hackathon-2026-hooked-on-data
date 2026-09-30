@@ -1,7 +1,7 @@
 """End-to-end smoke test against a REAL model provider and the core-banking DB.
 
-Runs the whole app in-process: 3 streamed chat turns (general questions), a regenerate
-check, and banking queries (card balance, available credit) whose figures are checked
+Runs the whole app in-process: 3 streamed turns of general questions (the classifier
+should route them without tools), and banking queries (card balance, available credit) whose figures are checked
 against the core-banking DB, for two different customers (ana, bruno). Providers come
 from the environment (.env), e.g. local Ollama:
 
@@ -57,7 +57,7 @@ def chat_turn(http: TestClient, cid: str, text: str) -> dict:
     # The in-process TestClient buffers the response, so time-to-first-token can't be
     # measured here (that comes from the /metrics histogram in M7). Delta count proves streaming.
     start = time.perf_counter()
-    resp = http.post(f"/v1/conversations/{cid}/messages", json={"text": text}, headers=USER)
+    resp = http.post(f"/v1/conversations/{cid}/agent-runs", json={"text": text}, headers=USER)
     resp.raise_for_status()
     body = resp.text
     events = parse_sse(body)
@@ -102,15 +102,14 @@ def main() -> int:
             anon = http.get("/v1/conversations")
             print(f"[auth] no token -> HTTP {anon.status_code} (expect 401)")
             failures += anon.status_code != 401
-        cid = http.post("/v1/conversations", json={"kind": "chat"}, headers=USER).json()["id"]
+        cid = http.post("/v1/conversations", json={}, headers=USER).json()["id"]
         for i, text in enumerate(CHAT_TURNS, 1):
             r = chat_turn(http, cid, text)
             print(f"\n[chat {i}] {text}\n  -> {r['text'].strip()!r}\n  "
-                  f"stop={r['stop_reason']} deltas={r['deltas']} "
-                  f"total={r['total_s']:.2f}s usage={r['usage']}")
+                  f"outcome={r['outcome']} deltas={r['deltas']} total={r['total_s']:.2f}s")
             if not r["text"].strip():
                 print("  FAIL: empty reply"); failures += 1
-            if r["deltas"] < 2 and r["usage"]["output_tokens"] > 3:
+            if r["deltas"] < 2 and len(r["text"]) > 20:
                 print("  WARN: reply arrived in fewer than 2 chunks (streaming not observed)")
         if "ana" not in r["text"].lower():
             print("  WARN: model did not recall the name from turn 1 (quality, not plumbing)")
@@ -118,17 +117,14 @@ def main() -> int:
         history = http.get(f"/v1/conversations/{cid}", headers=USER).json()["messages"]
         roles = [m["role"] for m in history]
         print(f"\n[history] {roles}")
-        if roles != ["user", "assistant"] * 3:
+        texts = [m for m in history if m["role"] == "user" and isinstance(m["content"], str)]
+        if len(texts) != 3 or roles[-1] != "assistant":
             print("  FAIL: unexpected history shape"); failures += 1
 
         peek = http.get(f"/v1/conversations/{cid}", headers=other)
         print(f"[isolation] another user reads this conversation -> HTTP {peek.status_code} "
               "(expect 404)")
         failures += peek.status_code != 404
-
-        regen = http.post(f"/v1/conversations/{cid}/regenerate", headers=USER)
-        print(f"[regenerate on answered conversation] HTTP {regen.status_code} (expect 409)")
-        failures += regen.status_code != 409
 
         # Banking: figures must match the core-banking DB, per customer.
         truth = asyncio.run(bank_truth(settings))
@@ -137,7 +133,7 @@ def main() -> int:
             for question, key in (("¿Cuál es el saldo de mi tarjeta de crédito?", "balance"),
                                   ("¿Cuánto crédito disponible me queda en la tarjeta?",
                                    "available")):
-                aid = http.post("/v1/conversations", json={"kind": "agent"},
+                aid = http.post("/v1/conversations", json={},
                                 headers=headers).json()["id"]
                 start = time.perf_counter()
                 events = parse_sse(http.post(f"/v1/conversations/{aid}/agent-runs",

@@ -147,7 +147,7 @@ def test_user_data_is_never_cached():
     with app_client() as http:
         headers = {"X-User-Id": "ana"}
         assert http.get("/v1/conversations", headers=headers).headers["cache-control"] == "no-store"
-        cid = http.post("/v1/conversations", json={"kind": "chat"}, headers=headers).json()["id"]
+        cid = http.post("/v1/conversations", json={}, headers=headers).json()["id"]
         assert http.get(f"/v1/conversations/{cid}", headers=headers).headers[
             "cache-control"] == "no-store"
         assert http.get("/config.json").headers["cache-control"] == "no-store"
