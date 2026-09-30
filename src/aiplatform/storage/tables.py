@@ -28,6 +28,8 @@ messages = sa.Table(
     sa.Column("role", sa.Text, nullable=False),
     sa.Column("content", JSONType, nullable=False),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    # Who wrote an assistant-role message when it wasn't the bot ("operator"); NULL otherwise.
+    sa.Column("author", sa.Text, nullable=True),
 )
 
 usage_events = sa.Table(
@@ -62,4 +64,22 @@ pending_actions = sa.Table(
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
     sa.Index("ix_pending_actions_conversation", "conversation_id", "status"),
+)
+
+# Conversations handed to a human advisor (agent/handoffs.py). `status` changes with a
+# conditional UPDATE on the expected status, so a handoff moves exactly once.
+handoffs = sa.Table(
+    "handoffs", metadata,
+    sa.Column("id", sa.Uuid(as_uuid=False), primary_key=True),
+    sa.Column("conversation_id", sa.Uuid(as_uuid=False),
+              sa.ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+    sa.Column("user_id", sa.Text, nullable=False),
+    sa.Column("status", sa.Text, nullable=False),
+    sa.Column("reason", sa.Text, nullable=False),
+    sa.Column("summary", sa.Text, nullable=False),
+    sa.Column("message_index", sa.Integer, nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Index("ix_handoffs_conversation", "conversation_id", "created_at"),
+    sa.Index("ix_handoffs_status", "status", "created_at"),
 )

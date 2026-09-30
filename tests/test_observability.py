@@ -26,7 +26,7 @@ async def test_stalled_provider_times_out_and_is_retried():
     client = FakeClient(Stall(5, text_reply("late")), text_reply("fast"))
     gw = AIGateway({"anthropic": client}, Settings(providers=["anthropic"]),
                    sleep=lambda _: asyncio.sleep(0))
-    route = replace(ROUTES["chat"], first_event_timeout_s=0.05)
+    route = replace(ROUTES["agent"], first_event_timeout_s=0.05)
     before = sample("aip_llm_errors_total", provider="anthropic", kind="timeout")
     events = [e async for e in gw.stream(route, system="s",
                                          messages=[{"role": "user", "content": "hi"}])]
@@ -35,18 +35,18 @@ async def test_stalled_provider_times_out_and_is_retried():
 
 
 async def test_usage_metrics_and_cost():
-    labels = {"route": "chat", "provider": "anthropic", "model": "claude-haiku-4-5"}
+    labels = {"route": "agent", "provider": "anthropic", "model": "claude-haiku-4-5"}
     before_out = sample("aip_llm_tokens_total", kind="output", **labels)
     before_cost = sample("aip_llm_cost_usd_total", **labels)
     before_ttft = sample("aip_llm_time_to_first_token_seconds_count",
-                         route="chat", provider="anthropic")
+                         route="agent", provider="anthropic")
     gw = AIGateway({"anthropic": FakeClient(text_reply("hi"))}, Settings(providers=["anthropic"]))
-    await gw.complete(ROUTES["chat"], system="s", messages=[{"role": "user", "content": "x"}])
+    await gw.complete(ROUTES["agent"], system="s", messages=[{"role": "user", "content": "x"}])
     assert sample("aip_llm_tokens_total", kind="output", **labels) == before_out + 5
     # Haiku 4.5: 10 input x $1 + 5 output x $5 per million tokens.
     assert abs(sample("aip_llm_cost_usd_total", **labels) - before_cost - 35e-6) < 1e-12
     assert sample("aip_llm_time_to_first_token_seconds_count",
-                  route="chat", provider="anthropic") == before_ttft + 1
+                  route="agent", provider="anthropic") == before_ttft + 1
 
 
 def client_for(fake=None, **settings):
@@ -97,15 +97,18 @@ def test_admin_usage_report(tmp_path):
     asyncio.run(setup())
     fake = FakeClient(text_reply("a"), text_reply("b"))
     with client_for(fake, database_url=url, admin_users=["boss"]) as http:
-        cid = http.post("/v1/conversations", json={"kind": "chat"}, headers=U1).json()["id"]
+        cid = http.post("/v1/conversations", json={}, headers=U1).json()["id"]
         for text in ("one", "two"):
-            http.post(f"/v1/conversations/{cid}/messages", json={"text": text}, headers=U1)
+            http.post(f"/v1/conversations/{cid}/agent-runs", json={"text": text}, headers=U1)
         assert http.get("/v1/admin/usage", headers=U1).status_code == 403
         report = http.get("/v1/admin/usage?days=1", headers={"X-User-Id": "boss"}).json()
-    [row] = report["rows"]
-    assert row["requests"] == 2 and row["model"] == "claude-haiku-4-5"
-    assert row["input_tokens"] == 20 and row["output_tokens"] == 10
-    assert report["total_cost_usd"] == 70e-6
+    # Each turn is one intent classification plus one agent call.
+    rows = {r["route"]: r for r in report["rows"]}
+    assert set(rows) == {"agent", "classify"}
+    for row in rows.values():
+        assert row["requests"] == 2 and row["model"] == "claude-haiku-4-5"
+        assert row["input_tokens"] == 20 and row["output_tokens"] == 10
+    assert abs(report["total_cost_usd"] - 140e-6) < 1e-12
 
 
 def test_admin_usage_needs_a_database():

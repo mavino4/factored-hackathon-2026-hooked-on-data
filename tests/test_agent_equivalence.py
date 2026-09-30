@@ -1,6 +1,7 @@
-"""Exact behavior of the agent and chat turns: event sequences, stored history, usage,
+"""Exact behavior of the agent's tool loop: event sequences, stored history, usage,
 errors and cancellation. Written against the hand-rolled loop before the LangGraph
-migration, so the graph must reproduce it event for event."""
+migration, so the graph must reproduce it event for event. (The intent classification
+that runs first is answered by FakeClient and tested in test_intent.py.)"""
 
 import asyncio
 
@@ -16,16 +17,11 @@ from aiplatform.agent.loop import (
     ToolResult,
 )
 from aiplatform.agent.tools import Tool
+from aiplatform.chat.history import MAX_HISTORY_CHARS, ConversationTooLong
 from aiplatform.chat.inflight import InFlight
 from aiplatform.chat.repository import InMemoryConversationRepository
-from aiplatform.chat.service import (
-    MAX_HISTORY_CHARS,
-    ChatService,
-    ConversationTooLong,
-    NothingToRegenerate,
-)
 from aiplatform.config import Settings
-from aiplatform.llm.gateway import AIGateway, Completed, ModelUnavailable, TextDelta
+from aiplatform.llm.gateway import AIGateway, ModelUnavailable
 from aiplatform.usage import InMemoryUsageStore
 from tests.fakes import FakeClient, make_message, status_error
 from tests.test_agent import TICKET, TICKET_SCHEMA, collect, final, tool_call
@@ -83,7 +79,8 @@ async def test_tool_run_exact_events_history_and_usage():
     assert conv.messages[2]["content"] == [
         {"type": "tool_result", "tool_use_id": "tu_1", "content": '{"time": "12:00"}'}]
     # One usage event per model call (10 in + 5 out each).
-    assert await usage.tokens_used_today("u1") == 30
+    # 2 agent calls + the intent classification, 15 tokens each.
+    assert await usage.tokens_used_today("u1") == 45
     # The reply language reaches every model call, after the cached system prompt.
     for call in client.calls:
         assert call["system"][1]["text"].startswith("Reply language: Spanish")
@@ -97,7 +94,7 @@ async def test_refusal_is_not_stored():
     events = await collect(agent.run("u1", conv.id, "x"))
     assert events == [AgentText("I can't help"), AgentDone("refused", "I can't help", [])]
     assert roles(conv) == ["user"]
-    assert await usage.tokens_used_today("u1") == 15
+    assert await usage.tokens_used_today("u1") == 30  # the agent call + classification
 
 
 async def test_truncated_tool_call_does_not_run_and_is_not_stored():
@@ -231,46 +228,5 @@ async def test_closing_the_stream_frees_the_conversation():
     assert await anext(stream) == AgentText("a")
     assert inflight.is_busy(conv.id)
     await stream.aclose()  # the client disconnected
-    await asyncio.sleep(0.05)  # nothing keeps running in the background
-    assert not inflight.is_busy(conv.id) and roles(conv) == ["user"]
-
-
-# --- Chat --------------------------------------------------------------------
-
-async def chat_setup(client):
-    repo, usage, inflight = InMemoryConversationRepository(), InMemoryUsageStore(), InFlight()
-    conv = await repo.create("u1", "chat")
-    return ChatService(gateway(client), repo, usage, inflight), conv, usage, inflight
-
-
-async def test_chat_exact_events_history_and_usage():
-    reply = (["Hel", "lo"], make_message({"type": "text", "text": "Hello"}))
-    chat, conv, usage, _ = await chat_setup(FakeClient(reply))
-    events = await collect(chat.send("u1", conv.id, "hi", "pt"))
-    assert [type(e) for e in events] == [TextDelta, TextDelta, Completed]
-    assert [e.text for e in events[:2]] == ["Hel", "lo"]
-    assert events[-1].provider == "anthropic"
-    assert roles(conv) == ["user", "assistant"]
-    assert await usage.tokens_used_today("u1") == 15
-
-
-async def test_chat_refusal_is_not_stored_and_regenerate_needs_a_user_message():
-    refusal = (["no"], make_message({"type": "text", "text": "no"}, stop_reason="refusal"))
-    chat, conv, _, inflight = await chat_setup(FakeClient(refusal, final("Hi again")))
-    await collect(chat.send("u1", conv.id, "hi"))
-    assert roles(conv) == ["user"]
-    events = await collect(chat.regenerate("u1", conv.id))
-    assert events[-1].message.content[0].text == "Hi again"
-    assert roles(conv) == ["user", "assistant"]
-    with pytest.raises(NothingToRegenerate):
-        await collect(chat.regenerate("u1", conv.id))
-    assert not inflight.is_busy(conv.id)
-
-
-async def test_chat_closing_the_stream_frees_the_conversation():
-    chat, conv, _, inflight = await chat_setup(FakeClient((["a", "b"], make_message())))
-    stream = chat.send("u1", conv.id, "x")
-    assert await anext(stream) == TextDelta("a")
-    await stream.aclose()
     await asyncio.sleep(0.05)  # nothing keeps running in the background
     assert not inflight.is_busy(conv.id) and roles(conv) == ["user"]

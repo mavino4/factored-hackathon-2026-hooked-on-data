@@ -1,7 +1,8 @@
 """Langfuse tracing: every chat or agent run becomes one trace, masked before it leaves.
 
-The trace holds the graph's nodes (Langfuse's LangChain callback handler), each model
-call (a ``generation`` from the gateway, with tokens) and each tool call. Traces carry
+The trace holds one span per graph step (``traced_node``), and under each step the model
+calls it made (``generation``, from the gateway, with tokens and cost) and the tools it
+ran. Traces carry
 the conversation ID as ``session_id``, so Langfuse's Sessions view shows a conversation
 turn by turn, and a keyed hash of the user ID as ``user_id``.
 
@@ -10,14 +11,14 @@ Every payload goes through ``privacy.Masker`` first (see ``privacy.py``). Off un
 ``deploy/langfuse``).
 """
 
+import functools
 import logging
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from typing import Any
 
 from langfuse import Langfuse, propagate_attributes
-from langfuse.langchain import CallbackHandler
 
 from aiplatform import privacy
 from aiplatform.config import Settings
@@ -29,11 +30,9 @@ _active: ContextVar["Tracing | None"] = ContextVar("tracing_active", default=Non
 
 
 class Tracing:
-    def __init__(self, client: Langfuse | None = None, masker: privacy.Masker | None = None,
-                 public_key: str | None = None):
+    def __init__(self, client: Langfuse | None = None, masker: privacy.Masker | None = None):
         self._client = client
         self._masker = masker
-        self._handler = CallbackHandler(public_key=public_key) if client else None
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "Tracing":
@@ -51,7 +50,7 @@ class Tracing:
                           mask=masker.mask)
         log.info("Langfuse tracing on", extra={"host": settings.langfuse_host,
                                                "mask_amounts": settings.trace_mask_amounts})
-        return cls(client, masker, settings.langfuse_public_key)
+        return cls(client, masker)
 
     @property
     def enabled(self) -> bool:
@@ -60,22 +59,23 @@ class Tracing:
     @contextmanager
     def run(self, config: dict) -> Iterator[dict]:
         """Wrap one graph run (see ``run_config``); yields the config to run it with."""
+        trace_input = config.get("trace_input")  # what started the run (masked on the way)
+        config = {k: v for k, v in config.items() if k != "trace_input"}
         if self._client is None:
             yield config
             return
-        # The callback handler copies run metadata to the trace without masking it, so
-        # only the pseudonym goes in.
-        metadata = {**config.get("metadata", {})}
-        metadata["user_id"] = self._masker.pseudonym(metadata["user_id"])
+        metadata = config.get("metadata", {})
+        user_id = self._masker.pseudonym(metadata["user_id"])
         name = config.get("run_name", "run")
+        details = {k: v for k, v in metadata.items() if k not in ("user_id", "thread_id")}
         with (privacy.run_scope(),
-              self._client.start_as_current_observation(as_type="agent", name=name),
-              propagate_attributes(user_id=metadata["user_id"],
-                                   session_id=metadata["thread_id"],
+              self._client.start_as_current_observation(
+                  as_type="agent", name=name, input=trace_input, metadata=details),
+              propagate_attributes(user_id=user_id, session_id=metadata["thread_id"],
                                    trace_name=name, tags=config.get("tags"))):
             token = _active.set(self)
             try:
-                yield {**config, "metadata": metadata, "callbacks": [self._handler]}
+                yield config
             finally:
                 _active.reset(token)
 
@@ -118,6 +118,26 @@ async def tool_span(name: str, args: dict[str, Any],
         yield span
 
 
+def traced_node(name: str, describe: Callable[[Any], Any] | None = None):
+    """Give a graph step its own span, so the model calls and tools it makes nest under it.
+    ``describe(state)`` is the step's input in the trace (keep it short); the state
+    update it returns is its output. A no-op outside a traced run."""
+    def wrap(fn: Callable[[Any], Awaitable[dict]]):
+        @functools.wraps(fn)
+        async def node(state):
+            tracing = _active.get()
+            if tracing is None:
+                return await fn(state)
+            with tracing._client.start_as_current_observation(
+                    as_type="span", name=name,
+                    input=describe(state) if describe else None) as span:
+                update = await fn(state)
+                span.update(output=update or None)
+                return update
+        return node
+    return wrap
+
+
 def register_sensitive(data: Any) -> None:
     """Mask the values in ``data`` (a tool output) wherever they appear later in the run."""
     tracing = _active.get()
@@ -125,7 +145,9 @@ def register_sensitive(data: Any) -> None:
         tracing._masker.register(data)
 
 
-def run_config(name: str, *, user_id: str, conversation_id: str, **metadata) -> dict:
-    """LangGraph config naming the run and grouping it into the conversation's session."""
-    return {"run_name": name, "tags": [name],
+def run_config(name: str, *, user_id: str, conversation_id: str, trace_input: Any = None,
+               **metadata) -> dict:
+    """LangGraph config naming the run and grouping it into the conversation's session.
+    ``trace_input`` is the root span's input (e.g. the customer's message)."""
+    return {"run_name": name, "tags": [name], "trace_input": trace_input,
             "metadata": {"thread_id": conversation_id, "user_id": user_id, **metadata}}

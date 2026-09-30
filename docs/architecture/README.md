@@ -9,7 +9,7 @@
 | **Growth target** | 1M+ concurrent users, spiky, global (§1 onward) |
 | **Stack** | Python 3.12, FastAPI, Anthropic Python SDK; light model (Claude Haiku 4.5) for first versions |
 
-**v1 as built:** [interactive diagram](bankbot-architecture.html) (open locally in a browser; each box links to its source lines at commit `0c76db2`). Spec: [`bankbot-architecture.json`](bankbot-architecture.json), generated with [Archify](https://github.com/tt-a1i/archify).
+**v1 as built:** [interactive diagram](bankbot-architecture.html) (open locally in a browser; each box links to its source lines at commit `93fd40b`), including self-hosted Langfuse tracing with PII masking. Spec: [`bankbot-architecture.json`](bankbot-architecture.json), generated with [Archify](https://github.com/tt-a1i/archify).
 
 ![BankBot v1 architecture](bankbot-architecture.png)
 
@@ -25,7 +25,7 @@ The real traffic is **6,000–10,000 per day**, not 1M concurrent. Even at 10× 
 | Streaming | SSE directly from the API process | Decoupled Redis Streams + stream gateway (ADR-0002) |
 | AI Gateway | In-process module: retries, circuit breaker, sticky provider failover, cache breakpoints, usage logs | Separate service with shared quotas (ADR-0003) |
 | Model | **Claude Haiku 4.5** on every route (configured in `llm/models.py`) | Per-route upgrades (Sonnet 5 / Opus 5) driven by evals |
-| Agents | In-process tool loop with iteration cap, validation, approval gate | Durable workflows (Temporal) (ADR-0004) |
+| Agents | One LangGraph agent for every message: intent classification first (tools only for account questions), tool loop with iteration cap, validation, approval gate, and human handoff (customer request or insistence; operator API) | Durable workflows (Temporal) (ADR-0004); operator console |
 | Storage | **Postgres** (SQLAlchemy + Alembic): conversations, append-only messages keyed by `(conversation_id, seq)`, usage events. In-memory for local dev only | Distributed SQL |
 | Limits | Per-user rate limit (per replica) + daily token quota (shared via `usage_events` in Postgres) | Redis-backed, degradation ladder (ADR-0005) |
 | Auth | **OIDC access tokens** (JWT, verified against the issuer's JWKS; any standard provider, Auth0 recommended). Dev-only header mode, refused in production | Same, plus roles/scopes per tool |

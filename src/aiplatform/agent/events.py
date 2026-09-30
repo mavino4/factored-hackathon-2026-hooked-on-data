@@ -3,7 +3,8 @@
 from dataclasses import dataclass
 from typing import Any, Literal
 
-Outcome = Literal["done", "approval_required", "refused", "truncated", "max_iterations"]
+Outcome = Literal["done", "approval_required", "refused", "truncated", "max_iterations",
+                  "handoff"]
 
 
 @dataclass
@@ -34,10 +35,29 @@ class ApprovalRequired:
 
 
 @dataclass
+class HandoffOffered:
+    """The customer insists without being resolved: offer a human advisor (Yes / No)."""
+    handoff_id: str
+
+
+@dataclass
+class HandoffStarted:
+    """The conversation is now in the human queue; the bot stops answering."""
+    handoff_id: str
+
+
+@dataclass
+class HumanWaiting:
+    """A message arrived while a human handles the conversation: stored, not answered."""
+    handoff_id: str
+
+
+@dataclass
 class AgentDone:
     outcome: Outcome
     text: str
     tool_calls: list[str]
 
 
-AgentEvent = AgentText | ToolCall | ToolResult | ApprovalRequired | AgentDone
+AgentEvent = (AgentText | ToolCall | ToolResult | ApprovalRequired | HandoffOffered
+              | HandoffStarted | HumanWaiting | AgentDone)

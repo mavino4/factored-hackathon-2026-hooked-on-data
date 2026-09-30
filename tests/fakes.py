@@ -72,13 +72,38 @@ class _Stream:
         return self._outcome[1]
 
 
+def classified(intent: str = "account", *, needs_tools: bool | None = None,
+               insistence: bool = False, reason: str = "test") -> tuple[list[str], Message]:
+    """The intent classifier's forced tool call."""
+    return [], make_message({"type": "tool_use", "id": "tu_classify", "name": "classify_intent",
+                             "input": {"intent": intent,
+                                       "needs_tools": intent == "account" if needs_tools is None
+                                       else needs_tools,
+                                       "insistence": insistence, "reason": reason}},
+                            stop_reason="tool_use")
+
+
+def is_classify(params: dict) -> bool:
+    return (params.get("tool_choice") or {}).get("name") == "classify_intent"
+
+
 class FakeClient:
-    def __init__(self, *outcomes):
+    """Replies with ``outcomes`` in order. The agent's intent classification is answered
+    automatically with ``classify`` (and kept out of ``calls``, in ``classify_calls``), so
+    tool-loop tests only script the agent's own model calls. ``classify=None`` makes the
+    classification take the next scripted outcome like any other call."""
+
+    def __init__(self, *outcomes, classify: str | None = "account"):
         self.outcomes = list(outcomes)
+        self.classify = classify
         self.calls: list[dict] = []
+        self.classify_calls: list[dict] = []
         self.messages = SimpleNamespace(stream=self._stream)
 
     def _stream(self, **params):
+        if self.classify is not None and is_classify(params):
+            self.classify_calls.append(params)
+            return _Stream(classified(self.classify))
         self.calls.append(params)
         return _Stream(self.outcomes.pop(0))
 

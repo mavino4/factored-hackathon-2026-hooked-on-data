@@ -1,48 +1,84 @@
-"""The agent tool loop as a LangGraph graph.
+"""The agent as a LangGraph graph: classify the message, then answer (with or without
+tools), or hand the conversation to a human.
 
-    START ─┬──────────────────> call_model ──> run_tools ──┐
-           └─> apply_decision ──┘  ▲  │                    │
-                                   │  └─ pause_turn ──┐    │
-                                   └──── while iterations < max_iterations
+    START ─┬─ open handoff ──> wait_for_human ──> END      (a human answers, not the bot)
+           ├─ decision ──────> apply_decision ──┐
+           └─ new message ───> classify ─┬─ human ──> handoff ──> END
+                                         └─ account / general / out_of_scope
+                                                        │
+                           ┌────────────────────────────┴──> call_model ──> run_tools ──┐
+                           │      (tools only for account)    ▲  │  └ pause_turn ─┐     │
+                           │                                  └──┴─ while iterations < max
     call_model (no tool calls, refused, truncated) or the iteration cap ──> finish ──> END
+    finish offers a human advisor when the customer insists without being resolved.
 
-The graph keeps nothing between requests (no checkpointer): the conversation and the
-pending actions live in their stores, so an approval starts a new run at
+The graph keeps nothing between requests (no checkpointer): the conversation, pending
+actions and handoffs live in their stores, so an approval starts a new run at
 ``apply_decision``. Irreversible tools never run inside the graph: they become pending
 actions. Nodes emit events with ``graph_stream.emitter()``, which waits for the client
-to take each one (see ``graph_stream``).
+to take each one (see ``graph_stream``). Each node has its own trace span.
 """
 
 import asyncio
 import json
 import logging
+from dataclasses import replace
 from typing import Any, NamedTuple, TypedDict
 
+import anthropic
 from langgraph.graph import END, START, StateGraph
 
+from aiplatform.agent import intent as intents
 from aiplatform.agent.actions import ActionStore, PendingAction
 from aiplatform.agent.events import (
     AgentDone,
     AgentText,
     ApprovalRequired,
+    HandoffOffered,
+    HandoffStarted,
+    HumanWaiting,
     Outcome,
     ToolCall,
     ToolResult,
 )
+from aiplatform.agent.handoffs import Handoff, HandoffStore
 from aiplatform.agent.tools import Tool, ToolContext
 from aiplatform.chat.history import assistant_turn, check_history_size
-from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT
+from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, CLASSIFY_SYSTEM_PROMPT
 from aiplatform.chat.repository import Conversation, ConversationRepository
 from aiplatform.graph_stream import emitter
-from aiplatform.llm.gateway import AIGateway, Completed, TextDelta
+from aiplatform.llm.gateway import AIGateway, Completed, GatewayError, TextDelta
 from aiplatform.llm.models import ROUTES
-from aiplatform.tracing import register_sensitive, tool_span
+from aiplatform.tracing import register_sensitive, tool_span, traced_node
 from aiplatform.usage import UsageEvent, UsageStore
 
 log = logging.getLogger(__name__)
 
 # Keep one tool result from flooding the context window.
 MAX_TOOL_RESULT_CHARS = 20_000
+
+# After the customer declines an advisor, don't offer again for this many of their turns.
+REOFFER_AFTER_TURNS = 3
+
+# Fixed replies when the conversation goes to a human (no model call).
+HANDOFF_TEXT = {
+    "es": ("Entendido. Lo comunico con un asesor, que le responderá en esta misma "
+           "conversación. Mientras tanto, puede dejar aquí sus mensajes."),
+    "pt": ("Entendido. Vou transferir o senhor para um atendente, que responderá nesta "
+           "mesma conversa. Enquanto isso, pode deixar suas mensagens aqui."),
+    "en": ("Understood. I'm transferring you to an advisor, who will reply in this same "
+           "conversation. Meanwhile, you can leave your messages here."),
+}
+
+
+def handoff_text(language: str | None) -> str:
+    return HANDOFF_TEXT.get(language or "es", HANDOFF_TEXT["es"])
+
+
+def customer_turns_since(messages: list[dict], index: int) -> int:
+    return sum(1 for m in messages[index:]
+               if m["role"] == "user" and isinstance(m["content"], str)
+               and not m["content"].startswith("[Approval]"))
 
 
 def awaiting_approval_text(action: PendingAction) -> str:
@@ -68,7 +104,11 @@ class AgentState(TypedDict):
     user_id: str
     conv: Conversation
     suffix: str | None  # per-request system text (reply language)
+    language: str | None  # the language the customer sees (for fixed texts)
     decision: Decision | None  # set when the run resumes after an approval decision
+    handoff: Handoff | None  # the conversation's latest handoff when the run started
+    intent: intents.Intent | None  # set by classify
+    use_tools: bool  # send the tool definitions to the model
     iterations: int  # model calls so far
     tool_calls: list[str]
     pending: bool  # an irreversible tool is waiting for approval
@@ -78,16 +118,20 @@ class AgentState(TypedDict):
 
 
 def initial_state(user_id: str, conv: Conversation, suffix: str | None,
-                  decision: Decision | None = None) -> AgentState:
-    return AgentState(user_id=user_id, conv=conv, suffix=suffix, decision=decision,
+                  decision: Decision | None = None, *, language: str | None = None,
+                  handoff: Handoff | None = None) -> AgentState:
+    return AgentState(user_id=user_id, conv=conv, suffix=suffix, language=language,
+                      decision=decision, handoff=handoff, intent=None,
+                      # An approval resumes a tool loop, which needs its tools.
+                      use_tools=decision is not None,
                       iterations=0, tool_calls=[], pending=False, tool_uses=[],
                       outcome=None, final_text="")
 
 
 def recursion_limit(max_iterations: int) -> int:
-    # call_model + run_tools per iteration, plus apply_decision and finish; our own
-    # iteration cap stops the run first.
-    return 2 * max_iterations + 3
+    # call_model + run_tools per iteration, plus classify (or apply_decision) and finish;
+    # our own iteration cap stops the run first.
+    return 2 * max_iterations + 4
 
 
 async def invoke_tool(tool: Tool, args: dict[str, Any], ctx: ToolContext) -> tuple[str, bool]:
@@ -115,11 +159,71 @@ async def _invoke_tool(tool: Tool, args: dict[str, Any], ctx: ToolContext) -> tu
     return output, False
 
 
+def _last_customer_text(conv: Conversation) -> str | None:
+    for m in reversed(conv.messages):
+        if m["role"] == "user" and isinstance(m["content"], str):
+            return m["content"]
+    return None
+
+
 def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage: UsageStore,
-                      actions: ActionStore, tools: dict[str, Tool], max_iterations: int):
+                      actions: ActionStore, handoffs: HandoffStore, tools: dict[str, Tool],
+                      max_iterations: int):
     definitions = [t.definition() for t in tools.values()]  # fixed per route for caching
     route = ROUTES["agent"]
+    classify_route = ROUTES["classify"]
 
+    async def record(state: AgentState, completed: Completed, route_name: str) -> None:
+        await usage.record(UsageEvent.from_message(
+            completed.message, user_id=state["user_id"], conversation_id=state["conv"].id,
+            route=route_name, provider=completed.provider))
+
+    @traced_node("wait_for_human", lambda s: {"handoff": s["handoff"].id})
+    async def wait_for_human(state: AgentState) -> dict:
+        """A human handles this conversation: the message is stored, the bot stays quiet."""
+        emit = emitter()
+        await emit(HumanWaiting(state["handoff"].id))
+        await emit(AgentDone("handoff", "", []))
+        return {}
+
+    @traced_node("classify", lambda s: {"message": _last_customer_text(s["conv"])})
+    async def classify(state: AgentState) -> dict:
+        """What does the customer want, can we resolve it, and does it need the tools?"""
+        conv = state["conv"]
+        try:
+            completed = await gateway.complete(
+                classify_route, system=CLASSIFY_SYSTEM_PROMPT,
+                messages=intents.classify_messages(conv.messages),
+                tools=[intents.CLASSIFY_TOOL], tool_choice=intents.FORCE_CLASSIFY,
+                conversation_id=conv.id)
+        except (GatewayError, anthropic.APIError):
+            # Never lose the turn over the classifier: answer with the full agent.
+            log.warning("intent classifier unavailable; using the full agent", exc_info=True)
+            intent = intents.FALLBACK
+        else:
+            await record(state, completed, classify_route.name)
+            intent = intents.parse(completed.message)
+        if not intent.insistence and intents.repeated(conv.messages):
+            intent = replace(intent, insistence=True)
+        use_tools = intent.name == "account" or intent.needs_tools
+        return {"intent": intent, "use_tools": use_tools}
+
+    @traced_node("handoff", lambda s: {"reason": s["intent"].reason if s["intent"] else None})
+    async def handoff(state: AgentState) -> dict:
+        """The customer asked for a person: queue the conversation for an advisor."""
+        emit, conv = emitter(), state["conv"]
+        item = await handoffs.create(
+            conversation_id=conv.id, user_id=state["user_id"], status="open",
+            reason="customer_request", summary=state["intent"].reason,
+            message_index=len(conv.messages))
+        text = handoff_text(state["language"])
+        await repo.append(conv, {"role": "assistant", "content": [{"type": "text", "text": text}]})
+        await emit(AgentText(text))
+        await emit(HandoffStarted(item.id))
+        await emit(AgentDone("handoff", text, []))
+        return {"handoff": item}
+
+    @traced_node("apply_decision", lambda s: s["decision"]._asdict())
     async def apply_decision(state: AgentState) -> dict:
         """Approve (run the tool) or reject a pending action."""
         emit = emitter()
@@ -139,6 +243,9 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         await repo.append(conv, {"role": "user", "content": decision_text(action, result)})
         return {}
 
+    @traced_node("call_model", lambda s: {
+        "iteration": s["iterations"] + 1, "tools": s["use_tools"],
+        "intent": s["intent"].name if s["intent"] else None})
     async def call_model(state: AgentState) -> dict:
         emit = emitter()
         conv = state["conv"]
@@ -146,16 +253,15 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         completed: Completed | None = None
         async for event in gateway.stream(
                 route, system=AGENT_SYSTEM_PROMPT, messages=conv.messages,
-                tools=definitions, conversation_id=conv.id, system_suffix=state["suffix"]):
+                tools=definitions if state["use_tools"] else None, conversation_id=conv.id,
+                system_suffix=state["suffix"]):
             if isinstance(event, TextDelta):
                 await emit(AgentText(event.text))
             else:
                 completed = event
         assert completed is not None
         message = completed.message
-        await usage.record(UsageEvent.from_message(
-            message, user_id=state["user_id"], conversation_id=conv.id,
-            route=route.name, provider=completed.provider))
+        await record(state, completed, route.name)
         update = {"iterations": state["iterations"] + 1, "tool_uses": [], "outcome": None,
                   "final_text": "".join(b.text for b in message.content if b.type == "text")}
 
@@ -195,6 +301,7 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
             return out, ApprovalRequired(action.id, block.name, block.input)
         return result(*await invoke_tool(tool, block.input, ToolContext(user_id, conv.id)))
 
+    @traced_node("run_tools", lambda s: {"tools": [b.name for b in s["tool_uses"]]})
     async def run_tools(state: AgentState) -> dict:
         emit = emitter()
         conv, blocks, pending = state["conv"], state["tool_uses"], state["pending"]
@@ -212,16 +319,42 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         return {"pending": pending, "tool_calls": [*state["tool_calls"], *(b.name for b in blocks)],
                 "tool_uses": []}
 
+    async def may_offer(state: AgentState) -> bool:
+        """Offer an advisor at most once per stretch of insistence."""
+        intent, conv = state["intent"], state["conv"]
+        if intent is None or not intent.insistence:
+            return False
+        latest = await handoffs.latest(conv.id)
+        if latest is None or latest.status == "closed":
+            return True
+        if latest.status == "declined":
+            return customer_turns_since(conv.messages, latest.message_index) > REOFFER_AFTER_TURNS
+        return False  # already offered and unanswered (or open)
+
+    @traced_node("finish", lambda s: {"outcome": s["outcome"] or "max_iterations"})
     async def finish(state: AgentState) -> dict:
+        emit = emitter()
         outcome = state["outcome"]
+        if outcome in ("done", "refused") and await may_offer(state):
+            conv = state["conv"]
+            offer = await handoffs.create(
+                conversation_id=conv.id, user_id=state["user_id"], status="offered",
+                reason="insistence", summary=state["intent"].reason,
+                message_index=len(conv.messages))
+            await emit(HandoffOffered(offer.id))
         if outcome is None:  # stopped by the iteration cap
-            await emitter()(AgentDone("max_iterations", "", state["tool_calls"]))
+            await emit(AgentDone("max_iterations", "", state["tool_calls"]))
         else:
-            await emitter()(AgentDone(outcome, state["final_text"], state["tool_calls"]))
+            await emit(AgentDone(outcome, state["final_text"], state["tool_calls"]))
         return {}
 
     def start(state: AgentState) -> str:
-        return "apply_decision" if state["decision"] else "call_model"
+        if state["handoff"] is not None and state["handoff"].status == "open":
+            return "wait_for_human"
+        return "apply_decision" if state["decision"] else "classify"
+
+    def after_classify(state: AgentState) -> str:
+        return "handoff" if state["intent"].name == "human" else "call_model"
 
     def next_call(state: AgentState) -> str:
         return "call_model" if state["iterations"] < max_iterations else "finish"
@@ -234,11 +367,17 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         return next_call(state)  # pause_turn: continue if iterations remain
 
     graph = StateGraph(AgentState)
+    graph.add_node("wait_for_human", wait_for_human)
+    graph.add_node("classify", classify)
+    graph.add_node("handoff", handoff)
     graph.add_node("apply_decision", apply_decision)
     graph.add_node("call_model", call_model)
     graph.add_node("run_tools", run_tools)
     graph.add_node("finish", finish)
-    graph.add_conditional_edges(START, start, ["apply_decision", "call_model"])
+    graph.add_conditional_edges(START, start, ["wait_for_human", "apply_decision", "classify"])
+    graph.add_edge("wait_for_human", END)
+    graph.add_conditional_edges("classify", after_classify, ["handoff", "call_model"])
+    graph.add_edge("handoff", END)
     graph.add_edge("apply_decision", "call_model")
     graph.add_conditional_edges("call_model", after_model, ["finish", "run_tools", "call_model"])
     graph.add_conditional_edges("run_tools", next_call, ["call_model", "finish"])

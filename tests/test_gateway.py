@@ -13,7 +13,7 @@ from aiplatform.llm.models import OPUS_5, ROUTES, Route
 from aiplatform.llm.resilience import CircuitBreaker
 from tests.fakes import FakeClient, MidStreamFailure, status_error, text_reply
 
-CHAT = ROUTES["chat"]
+AGENT = ROUTES["agent"]
 
 
 async def no_sleep(_):
@@ -26,7 +26,7 @@ def gateway(clients, providers=None):
 
 
 async def collect(gw, **kw):
-    return [e async for e in gw.stream(CHAT, system="sys", messages=[
+    return [e async for e in gw.stream(AGENT, system="sys", messages=[
         {"role": "user", "content": "hi"}], **kw)]
 
 
@@ -39,14 +39,14 @@ async def test_streams_deltas_then_completed():
 
 def test_params_set_cache_breakpoints_without_mutating_history():
     history = [{"role": "user", "content": "hi"}]
-    params = build_params(CHAT, "anthropic", system="sys", messages=history, tools=None)
+    params = build_params(AGENT, "anthropic", system="sys", messages=history, tools=None)
     assert params["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert params["messages"][-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
     assert history == [{"role": "user", "content": "hi"}]
 
 
 def test_light_model_sends_no_thinking_or_effort():
-    params = build_params(CHAT, "anthropic", system="s", messages=[], tools=None)
+    params = build_params(AGENT, "anthropic", system="s", messages=[], tools=None)
     assert params["model"] == "claude-haiku-4-5"
     assert "thinking" not in params and "output_config" not in params
 
@@ -58,9 +58,26 @@ def test_larger_model_gets_adaptive_thinking_and_effort():
     assert params["output_config"] == {"effort": "high"}
 
 
+def test_forced_tool_choice_skips_thinking():
+    route = Route("x", OPUS_5, max_tokens=300, effort="high")
+    choice = {"type": "tool", "name": "classify_intent"}
+    params = build_params(route, "anthropic", system="s", messages=[],
+                          tools=[{"name": "classify_intent"}], tool_choice=choice)
+    assert params["tool_choice"] == choice
+    assert "thinking" not in params and "output_config" not in params
+
+
+def test_app_only_message_keys_are_not_sent():
+    history = [{"role": "user", "content": "hi"},
+               {"role": "assistant", "author": "operator", "content": "Hello, I'm Ana"}]
+    params = build_params(AGENT, "anthropic", system="s", messages=history, tools=None)
+    assert all(set(m) == {"role", "content"} for m in params["messages"])
+    assert history[1]["author"] == "operator"  # stored history untouched
+
+
 def test_tools_sorted_and_provider_model_ids():
     tools = [{"name": "b"}, {"name": "a"}]
-    params = build_params(CHAT, "vertex", system="s", messages=[], tools=tools)
+    params = build_params(AGENT, "vertex", system="s", messages=[], tools=tools)
     assert [t["name"] for t in params["tools"]] == ["a", "b"]
     assert params["model"] == "claude-haiku-4-5@20251001"
 

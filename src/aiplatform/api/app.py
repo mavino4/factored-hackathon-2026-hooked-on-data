@@ -22,11 +22,15 @@ from pydantic import BaseModel, Field
 
 from aiplatform import metrics
 from aiplatform.agent.actions import ActionNotPending, InMemoryActionStore
+from aiplatform.agent.handoffs import HandoffNotFound, InMemoryHandoffStore
 from aiplatform.agent.loop import (
     AgentDone,
     AgentRunner,
     AgentText,
     ApprovalRequired,
+    HandoffOffered,
+    HandoffStarted,
+    HumanWaiting,
     ToolCall,
     ToolResult,
 )
@@ -34,11 +38,11 @@ from aiplatform.agent.tools import Tool
 from aiplatform.auth import AuthError, OIDCVerifier
 from aiplatform.banking.repository import BankRepository, NotLinked, PostgresBankRepository
 from aiplatform.banking.tools import make_bank_tools
+from aiplatform.chat.history import ConversationTooLong
 from aiplatform.chat.inflight import ConversationBusy, InFlight
 from aiplatform.chat.repository import ConversationNotFound, InMemoryConversationRepository
-from aiplatform.chat.service import ChatService, ConversationTooLong, NothingToRegenerate
 from aiplatform.config import Settings, get_settings
-from aiplatform.llm.gateway import AIGateway, Completed, GatewayError, TextDelta
+from aiplatform.llm.gateway import AIGateway, GatewayError
 from aiplatform.llm.models import prices_for
 from aiplatform.llm.providers import build_clients, close_clients
 from aiplatform.logging import configure_logging, request_id
@@ -46,6 +50,7 @@ from aiplatform.ratelimit import RateLimiter
 from aiplatform.storage.sql import (
     SqlActionStore,
     SqlConversationRepository,
+    SqlHandoffStore,
     SqlUsageStore,
     create_engine,
 )
@@ -56,7 +61,8 @@ log = logging.getLogger(__name__)
 
 
 class NewConversation(BaseModel):
-    kind: Literal["chat", "agent"] = "chat"
+    # Ignored: chat and agent are one flow now. Accepted so older clients keep working.
+    kind: Literal["chat", "agent"] | None = None
 
 
 Language = Literal["es", "pt", "en"]
@@ -73,6 +79,15 @@ class UserMessage(Reply):
 
 class Decision(Reply):
     decision: Literal["approve", "reject"]
+
+
+class HandoffAnswer(Reply):
+    handoff_id: str
+    accept: bool
+
+
+class OperatorMessage(BaseModel):
+    text: str = Field(min_length=1, max_length=20_000)
 
 
 def create_app(settings: Settings | None = None, gateway: AIGateway | None = None,
@@ -93,11 +108,11 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         if settings.database_url:
             engine = create_engine(settings.database_url)
             repo, usage = SqlConversationRepository(engine), SqlUsageStore(engine)
-            actions = SqlActionStore(engine)
+            actions, handoffs = SqlActionStore(engine), SqlHandoffStore(engine)
         else:
             log.warning("AIP_DATABASE_URL not set: using in-memory storage (data is lost on restart)")
             repo, usage = InMemoryConversationRepository(), InMemoryUsageStore()
-            actions = InMemoryActionStore()
+            actions, handoffs = InMemoryActionStore(), InMemoryHandoffStore()
         inflight = InFlight()
         metrics_server = None
         if settings.metrics_port:
@@ -110,7 +125,6 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         app.state.quota = TokenQuota(usage, settings.user_tokens_per_day)
         app.state.limiter = RateLimiter(settings.user_requests_per_minute)
         tracing = Tracing.from_settings(settings)
-        app.state.chat = ChatService(gw, repo, usage, inflight, tracing)
         bank = bank_repo
         if bank is None and settings.bank_database_url is not None:
             bank = PostgresBankRepository(settings.bank_database_url.get_secret_value())
@@ -121,7 +135,7 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             if bank is None:
                 log.warning("AIP_BANK_DATABASE_URL not set: the agent has no banking tools")
         app.state.agent = AgentRunner(gw, repo, usage, inflight, actions, agent_tools,
-                                      tracing=tracing)
+                                      handoffs=handoffs, tracing=tracing)
         yield
         tracing.flush()
         if bank is not None and bank_repo is None:
@@ -261,7 +275,7 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
     @app.post("/v1/conversations", status_code=201)
     async def create_conversation(body: NewConversation, request: Request,
                                   user_id: Annotated[str, Depends(current_user)]) -> dict:
-        conv = await request.app.state.repo.create(user_id, body.kind)
+        conv = await request.app.state.repo.create(user_id, "agent")
         return _summary(conv)
 
     @app.get("/v1/me")
@@ -289,27 +303,11 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
     async def read_conversation(conversation_id: str, request: Request,
                                 user_id: Annotated[str, Depends(current_user)]) -> dict:
         conv = await get_conversation(request, conversation_id, user_id)
-        pending = []
-        if conv.kind == "agent":
-            pending = [{"id": a.id, "tool_name": a.tool_name, "input": a.input}
-                       for a in await request.app.state.actions.list_pending(conv.id, user_id)]
-        return {**_summary(conv), "messages": conv.messages, "pending_actions": pending}
-
-    @app.post("/v1/conversations/{conversation_id}/messages")
-    async def send_message(conversation_id: str, body: UserMessage, request: Request,
-                           user_id: Annotated[str, Depends(admit)]) -> StreamingResponse:
-        conv = await get_conversation(request, conversation_id, user_id, "chat")
-        return _stream(request.app.state.chat.send(user_id, conv.id, body.text, body.language))
-
-    @app.post("/v1/conversations/{conversation_id}/regenerate")
-    async def regenerate(conversation_id: str, request: Request,
-                         user_id: Annotated[str, Depends(admit)],
-                         body: Reply | None = None) -> StreamingResponse:
-        conv = await get_conversation(request, conversation_id, user_id, "chat")
-        if not conv.messages or conv.messages[-1]["role"] != "user":
-            raise HTTPException(409, "the last message already has a reply")
-        return _stream(request.app.state.chat.regenerate(
-            user_id, conv.id, body.language if body else None))
+        pending = [{"id": a.id, "tool_name": a.tool_name, "input": a.input}
+                   for a in await request.app.state.actions.list_pending(conv.id, user_id)]
+        handoff = await request.app.state.agent.handoffs.latest(conv.id)
+        return {**_summary(conv), "messages": conv.messages, "pending_actions": pending,
+                "handoff": _handoff(handoff) if handoff else None}
 
     @app.post("/v1/conversations/{conversation_id}/agent-runs")
     async def run_agent(conversation_id: str, body: UserMessage, request: Request,
@@ -328,6 +326,73 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         return _stream(request.app.state.agent.decide(
             user_id, conv.id, action_id, approve=body.decision == "approve",
             language=body.language))
+
+    @app.post("/v1/conversations/{conversation_id}/handoff")
+    async def answer_handoff(conversation_id: str, body: HandoffAnswer, request: Request,
+                             user_id: Annotated[str, Depends(current_user)]) -> dict:
+        """The customer accepts or declines an offered human advisor."""
+        conv = await get_conversation(request, conversation_id, user_id)
+        try:
+            handoff = await request.app.state.agent.answer_offer(
+                user_id, conv.id, body.handoff_id, body.accept, body.language)
+        except HandoffNotFound:
+            raise HTTPException(404, "no offered handoff with this id") from None
+        except ConversationBusy:
+            raise HTTPException(409, "a reply is already in progress") from None
+        return _handoff(handoff)
+
+    # Operators (users in AIP_ADMIN_USERS) attend handed-off conversations. There is no
+    # console yet: these endpoints are the operator API.
+    def operator(user_id: str) -> str:
+        if user_id not in settings.admin_users:
+            raise HTTPException(403, "admin only")
+        return user_id
+
+    @app.get("/v1/admin/handoffs")
+    async def list_handoffs(
+            request: Request, user_id: Annotated[str, Depends(current_user)],
+            status: Literal["offered", "open", "declined", "closed"] | None = "open",
+            limit: int = Query(100, ge=1, le=500)) -> dict:
+        operator(user_id)
+        items = await request.app.state.agent.handoffs.list(status, limit)
+        return {"handoffs": [{**_handoff(h), "conversation_id": h.conversation_id,
+                              "user_id": h.user_id, "summary": h.summary,
+                              "created_at": h.created_at.isoformat()} for h in items]}
+
+    @app.get("/v1/admin/handoffs/{handoff_id}")
+    async def read_handoff(handoff_id: str, request: Request,
+                           user_id: Annotated[str, Depends(current_user)]) -> dict:
+        operator(user_id)
+        try:
+            h = await request.app.state.agent.handoffs.get(handoff_id)
+        except HandoffNotFound:
+            raise HTTPException(404, "handoff not found") from None
+        conv = await request.app.state.repo.get(h.conversation_id, h.user_id)
+        return {**_handoff(h), "user_id": h.user_id, "summary": h.summary,
+                "conversation": {**_summary(conv), "messages": conv.messages}}
+
+    @app.post("/v1/admin/handoffs/{handoff_id}/messages", status_code=201)
+    async def operator_message(handoff_id: str, body: OperatorMessage, request: Request,
+                               user_id: Annotated[str, Depends(current_user)]) -> dict:
+        operator(user_id)
+        try:
+            await request.app.state.agent.operator_reply(handoff_id, user_id, body.text)
+        except HandoffNotFound:
+            raise HTTPException(404, "no open handoff with this id") from None
+        except ConversationBusy:
+            raise HTTPException(409, "the customer is writing; retry") from None
+        return {"status": "sent"}
+
+    @app.post("/v1/admin/handoffs/{handoff_id}/close")
+    async def close_handoff(handoff_id: str, request: Request,
+                            user_id: Annotated[str, Depends(current_user)]) -> dict:
+        """Close the case; the bot answers the conversation again."""
+        operator(user_id)
+        try:
+            h = await request.app.state.agent.close_handoff(handoff_id)
+        except HandoffNotFound:
+            raise HTTPException(404, "no open handoff with this id") from None
+        return _handoff(h)
 
     # The web UI: static files at "/". Mounted last so API routes take precedence.
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
@@ -354,6 +419,10 @@ def _security_headers(settings: Settings) -> dict[str, str]:
     }
 
 
+def _handoff(h) -> dict:
+    return {"id": h.id, "status": h.status, "reason": h.reason}
+
+
 def _summary(conv) -> dict:
     return {"id": conv.id, "kind": conv.kind, "title": conv.title,
             "created_at": conv.created_at.isoformat(), "updated_at": conv.updated_at.isoformat()}
@@ -372,16 +441,10 @@ REFUSAL = {"message": "The assistant can't help with that request."}
 
 
 def _encode(event) -> list[str]:
-    """Map chat/agent events to SSE frames."""
+    """Map agent events to SSE frames."""
     match event:
-        case TextDelta(text=text) | AgentText(text=text):
+        case AgentText(text=text):
             return [_event("delta", {"text": text})]
-        case Completed(message=message):
-            frames = [_event("refusal", REFUSAL)] if message.stop_reason == "refusal" else []
-            return frames + [_event("done", {
-                "stop_reason": message.stop_reason,
-                "usage": {"input_tokens": message.usage.input_tokens,
-                          "output_tokens": message.usage.output_tokens}})]
         # Customers see progress ("consulting...") but not the tools' arguments or raw
         # results; the model's answer is what they read.
         case ToolCall(id=id, name=name):
@@ -391,6 +454,12 @@ def _encode(event) -> list[str]:
         case ApprovalRequired(action_id=action_id, tool_name=tool_name, input=args):
             return [_event("approval_required", {"action_id": action_id,
                                                  "tool_name": tool_name, "input": args})]
+        case HandoffOffered(handoff_id=handoff_id):
+            return [_event("handoff_offer", {"handoff_id": handoff_id})]
+        case HandoffStarted(handoff_id=handoff_id):
+            return [_event("handoff", {"handoff_id": handoff_id})]
+        case HumanWaiting(handoff_id=handoff_id):
+            return [_event("human_waiting", {"handoff_id": handoff_id})]
         case AgentDone(outcome=outcome, tool_calls=tool_calls):
             frames = [_event("refusal", REFUSAL)] if outcome == "refused" else []
             return frames + [_event("done", {"outcome": outcome, "tool_calls": tool_calls})]
@@ -410,9 +479,6 @@ async def _sse(events: AsyncIterator) -> AsyncIterator[str]:
     except ActionNotPending:
         yield _event("error", {"code": "action_not_pending",
                                "message": "This action was already decided."})
-    except NothingToRegenerate:
-        yield _event("error", {"code": "nothing_to_regenerate",
-                               "message": "The last message already has a reply."})
     except anthropic.BadRequestError:
         log.exception("chat request rejected by the model API")
         yield _event("error", {"code": "invalid_request",
