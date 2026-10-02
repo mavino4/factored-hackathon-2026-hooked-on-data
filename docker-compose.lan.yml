@@ -1,17 +1,43 @@
-# LAN demo: the web UI on http://<this machine's IP>:8000 for other devices on a TRUSTED network.
-#   make lan        (= docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d --build)
-# Dev login: anyone on the network can pick any username, including the demo customers, so
-# only use it on a network you trust. The model runs on the local Ollama, so visitors don't
-# spend Claude API credits, and nginx rate-limits /v1/ per client IP.
+# LAN demo: the web UI on https://<this machine's IP> for other devices on the local network.
+#   make lan        (= make tls langfuse-up, then docker compose -f docker-compose.yml
+#                     -f docker-compose.lan.yml up -d --build)
+# Sign-in is by username + password (accounts from `make users`, see scripts/users.py),
+# over HTTPS with a certificate signed by this machine's own authority (deploy/tls): a
+# device warns until it trusts http://<this machine's IP>:8000/ca.crt. Port 8000 (HTTP)
+# only redirects to HTTPS. The model is Claude (ANTHROPIC_API_KEY from .env), so
+# visitors spend API credits: per-user limits below plus nginx's per-IP rate limit bound it.
+# Traces go, masked, to the self-hosted Langfuse over its internal Docker network.
+# The operator API (/v1/admin/) only answers requests from this machine (see nginx.lan.conf).
 services:
   app:
     environment:
-      AIP_AUTH_MODE: dev
-      AIP_PROVIDERS: '["ollama"]'
-      AIP_ADMIN_USERS: "[]"  # dev usernames can be guessed: no admin endpoints on the LAN
+      AIP_AUTH_MODE: password
+      # HTTPS only: browsers never send the session cookie over plain HTTP.
+      AIP_SESSION_COOKIE_SECURE: "true"
+      AIP_PROVIDERS: '["anthropic"]'
+      # Only reachable from this machine: nginx.lan.conf denies /v1/admin/ to the LAN.
+      AIP_ADMIN_USERS: '["operador"]'
       AIP_USER_REQUESTS_PER_MINUTE: "10"
       AIP_USER_TOKENS_PER_DAY: "200000"
+      # Langfuse's web service on its own compose network (make langfuse-up).
+      LANGFUSE_BASE_URL: http://langfuse-web:3000
+    networks: [default, langfuse]
 
   lb:
-    # Same mount path as in docker-compose.yml, so this replaces the default config.
-    volumes: [./deploy/nginx.lan.conf:/etc/nginx/conf.d/default.conf:ro]
+    ports: ["443:443"]  # added to 8000:80 from docker-compose.yml
+    volumes:
+      # Same mount path as in docker-compose.yml, so this replaces the default config.
+      - ./deploy/nginx.lan.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/tls:/etc/nginx/tls:ro
+
+networks:
+  default:
+    # Fixed subnet: requests from this machine reach nginx from the gateway 172.30.0.1,
+    # the only address nginx.lan.conf lets into /v1/admin/.
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1
+  langfuse:
+    name: langfuse_default
+    external: true

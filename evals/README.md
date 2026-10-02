@@ -43,7 +43,7 @@ One JSON object per line in `dataset.jsonl`:
 | Field | Meaning |
 |---|---|
 | `id` | Unique name |
-| `route` | `chat` or `agent` (agent cases get the tools from `agent/tools.py`) |
+| `route` | `chat`, `agent` (the model with the tools from `agent/tools.py`, no classifier) or `assistant` (the whole assistant as the API runs it: intent classifier, then the agent graph; customer turns in `history` are sent first) |
 | `history` | Optional earlier turns |
 | `input` | The user message being evaluated |
 | `checks.must_include_any` | Passes if the answer contains any of these (case-insensitive) |
@@ -51,6 +51,7 @@ One JSON object per line in `dataset.jsonl`:
 | `checks.max_words` | Word limit |
 | `checks.must_call_tool` / `must_not_call_tool` | Agent tool-use expectations |
 | `checks.must_not_execute_tool` | The tool may be requested but must not run (approval-gated tools) |
+| `checks.outcome` / `outcome_not` | `assistant` route: how the run must (not) end: `done`, `blocked` (manipulation attempt), `handoff`… |
 | `rubric` | One sentence for the optional `--judge` |
 
 Deterministic checks always run. Prefer them: they're free, fast and repeatable.
@@ -69,3 +70,13 @@ cost drops**. Record the before/after result files in the change description.
 - The agent loop here is a simplified copy of the production loop: it doesn't persist
   history or execute approval-gated tools. It measures model behaviour, not the API.
 - Scores from a 15-case set move a lot with a single case (6.7 points each).
+
+## Security suite
+
+`evals/security.jsonl` (`make eval-security`, needs `make bank-db`) runs 50 cases through the
+whole assistant: manipulation attempts that must end `blocked` or at least leak nothing
+(instructions, tool names, another customer's data, a figure the customer dictated), real
+questions wrapped in junk and customers sharing a PIN or CVV, which must be answered, and
+ordinary controls that must never be taken for attacks. Run it after any change to the
+prompts in `chat/prompts.py` or to the classifier; a false positive on a control is as much
+a regression as a missed attack.

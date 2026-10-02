@@ -35,7 +35,8 @@ function el(tag, attrs = {}, ...children) {
 }
 
 // ---------------------------------------------------------------------------
-// Auth: "dev" (X-User-Id header) or "oidc" (authorization code + PKCE)
+// Auth: "dev" (X-User-Id header), "password" (session cookie the page can't read) or
+// "oidc" (authorization code + PKCE)
 // ---------------------------------------------------------------------------
 const TOKEN_KEY = "aip.token";
 const DEV_USER_KEY = "aip.devUser";
@@ -124,6 +125,10 @@ async function initAuth() {
     const user = sessionStorage.getItem(DEV_USER_KEY);
     return user ? { header: { "X-User-Id": user }, user } : null;
   }
+  if (state.config.auth_mode === "password") {
+    const res = await fetch("/v1/me");  // is there a session cookie still valid?
+    return res.ok ? { header: {}, user: (await res.json()).user_id } : null;
+  }
   const params = new URLSearchParams(location.search);
   if (params.has("code")) {
     const token = await finishOidcLogin(params.get("code"), params.get("state"));
@@ -151,6 +156,9 @@ async function logout() {
   state.current = null;
   state.conversations = [];
   resetView();
+  if (state.config.auth_mode === "password") {
+    try { await fetch("/v1/auth/logout", { method: "POST" }); } catch { /* offline: the session expires on its own */ }
+  }
   if (wasOidc) {
     try {
       const meta = await discovery();
@@ -184,10 +192,12 @@ function resetView() {
 function showLogin(errorMessage) {
   $("app").hidden = true;
   $("login").hidden = false;
-  const dev = state.config.auth_mode === "dev";
-  $("dev-login").hidden = !dev;
-  $("oidc-login").hidden = dev;
-  $("login-hint").textContent = t(dev ? "login_hint_dev" : "login_hint_oidc");
+  const mode = state.config.auth_mode;
+  $("dev-login").hidden = mode !== "dev";
+  $("password-login").hidden = mode !== "password";
+  $("oidc-login").hidden = mode !== "oidc";
+  $("login-password").value = "";
+  $("login-hint").textContent = t(`login_hint_${mode}`);
   $("login-error").hidden = !errorMessage;
   $("login-error").textContent = errorMessage || "";
 }
@@ -679,6 +689,7 @@ async function showApp() {
   $("login").hidden = true;
   $("app").hidden = false;
   $("user-name").textContent = state.auth.user;
+  $("change-password").hidden = state.config.auth_mode !== "password";
   await loadConversations();
   try {
     state.me = await (await api("/v1/me")).json();
@@ -687,6 +698,39 @@ async function showApp() {
     state.me = null;  // greet without a name
   }
   showWelcome();  // every session starts with a new query and BankBot's greeting
+}
+
+async function passwordLogin() {
+  const res = await fetch("/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: $("login-user").value, password: $("login-password").value }),
+  });
+  $("login-password").value = "";
+  if (res.status === 429) throw new Error(t("too_many_attempts"));
+  if (!res.ok) throw new Error(t("invalid_credentials"));
+  state.auth = { header: {}, user: (await res.json()).user_id };
+  await showApp();
+}
+
+async function changePassword() {
+  const error = $("password-error");
+  error.hidden = true;
+  const res = await fetch("/v1/auth/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password: $("current-password").value,
+                           new_password: $("new-password").value }),
+  });
+  if (res.ok) {
+    $("password-dialog").close();
+    $("password-form").reset();
+    return;
+  }
+  const key = { 401: "session_expired", 403: "wrong_current_password", 422: "password_rule",
+                429: "too_many_attempts" }[res.status] || "password_not_changed";
+  error.textContent = t(key);
+  error.hidden = false;
 }
 
 function guard(fn) {
@@ -707,6 +751,23 @@ async function boot() {
     sessionStorage.setItem(DEV_USER_KEY, user);
     state.auth = { header: { "X-User-Id": user }, user };
     showApp().catch((err) => showLogin(err.message));
+  });
+  $("password-login").addEventListener("submit", (event) => {
+    event.preventDefault();
+    passwordLogin().catch((err) => showLogin(err.message));
+  });
+  $("change-password").addEventListener("click", () => {
+    $("password-form").reset();
+    $("password-error").hidden = true;
+    $("password-dialog").showModal();
+  });
+  $("password-cancel").addEventListener("click", () => $("password-dialog").close());
+  $("password-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    changePassword().catch((err) => {
+      $("password-error").textContent = err.message;
+      $("password-error").hidden = false;
+    });
   });
   $("oidc-login").addEventListener("click", () => startOidcLogin().catch((err) => showLogin(err.message)));
   $("logout").addEventListener("click", () => { logout(); });

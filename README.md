@@ -19,6 +19,7 @@ src/aiplatform/
   storage/           Postgres/SQL schema + repository and usage store
   usage.py           token usage events and the daily token quota
   auth.py            OIDC access-token (JWT) verification
+  accounts.py        username + password accounts, sessions and their audit trail
   agent/             the agent graph (LangGraph): intent classification, tool loop,
                      approvals and human handoffs
   api/app.py         HTTP API (SSE streaming) + serves the web UI
@@ -60,10 +61,10 @@ Open http://localhost:8000 (from `make run` or `docker compose up`).
   **approval card** (Approve or Reject) and run only after approval.
 - If the customer insists without being resolved, BankBot offers an advisor (Yes / No card).
   While an advisor attends the conversation, their messages show with an "Asesor" label.
-- Sign-in follows `AIP_AUTH_MODE`: a username field in `dev` mode, or the provider's login page
-  in `oidc` mode (authorization code + PKCE).
+- Sign-in follows `AIP_AUTH_MODE`: a username field in `dev` mode, username + password in
+  `password` mode, or the provider's login page in `oidc` mode (authorization code + PKCE).
 
-Browser end-to-end test (headless Chromium; covers both login modes, chat, reload, agent approval):
+Browser end-to-end test (headless Chromium; covers the three login modes, chat, reload, agent approval):
 
 ```bash
 uv run --with playwright python -m playwright install chromium   # once
@@ -73,6 +74,26 @@ AIP_PROVIDERS='["ollama"]' uv run --with playwright python scripts/e2e_ui.py
 ### Authentication
 
 - `AIP_AUTH_MODE=dev` (local only): the API trusts an `X-User-Id` header. Refused when `AIP_ENV=production`.
+- `AIP_AUTH_MODE=password`: username + password accounts kept by the app (`src/aiplatform/accounts.py`).
+  - **Accounts** are created by the operator, never by sign-up: `make users` gives every Active
+    customer a username (the first part of their email, numbered when several customers share
+    it: `maria.gomez`, `maria.gomez2`…) and a random 16-character password. Customers without
+    an email get no account. Running it again only adds the missing ones.
+  - **Passwords** are stored only as Argon2id hashes. The plain text exists once, in
+    `credentials/users-<timestamp>.csv` (mode 600, git-ignored): deliver it safely and delete
+    it. A lost password can't be recovered, only replaced:
+    `uv run python scripts/users.py rotate <username>`. Users can change theirs in the UI
+    (12+ characters), which signs out their other sessions. The email is never stored.
+  - **Sign-in** (`POST /v1/auth/login`) answers the same `401` for an unknown user, a wrong
+    password, a locked account and a disabled one. 5 failures in a row lock the account for
+    15 minutes (`unlock` lifts it), and attempts are rate-limited per client address.
+  - **Sessions** are an opaque random token in an `HttpOnly`, `SameSite=Strict` cookie
+    (`Secure` in production); the database keeps only its SHA-256. They end after 30 minutes
+    without activity, 8 hours at most, on sign-out, and when the password changes.
+  - **Audit**: every account event (created, sign-in, failure, lock, sign-out, password
+    change, rotation…) is appended to `auth_events` with the time and client address.
+  - Other operator commands: `scripts/users.py create|disable|enable|relink` (see its header).
+    An operator account for `/v1/admin/*`: `uv run python scripts/users.py create operador`.
 - `AIP_AUTH_MODE=oidc` (default): every `/v1/*` call needs `Authorization: Bearer <JWT>` from the
   configured issuer. Any standard OIDC provider works (Auth0, Keycloak, Cognito, Entra ID…):
   set `AIP_OIDC_ISSUER` and `AIP_OIDC_AUDIENCE`. `user_id` is the token's `sub`.
@@ -97,15 +118,32 @@ docker compose up --build -d  # API on http://localhost:8000 (dev auth, Ollama p
 docker compose down           # stop (add -v to also delete the database volume)
 ```
 
-To demo it to other devices on a **trusted** local network (phones, other laptops):
+To demo it to other devices on the local network (phones, other laptops), over HTTPS:
 
 ```bash
-make lan   # UI on http://<this machine's IP>:8000; dev login, local Ollama, per-IP rate limit
+make bank-db && make migrate && make users   # once: the bank data and the customers' accounts
+make lan   # UI on https://<this machine's IP>; password login, Claude, per-IP rate limit,
+           # traces to Langfuse; operator API (/v1/admin/) only from this machine (https://localhost)
 ```
 
-Anyone on the network can sign in as any username (including the demo customers), so don't
-use it on shared or public Wi-Fi. Postgres only listens on `127.0.0.1`. A plain
+Customers sign in with the username and password from `credentials/users-*.csv` (see
+[Authentication](#authentication)). Postgres only listens on `127.0.0.1`. A plain
 `docker compose up` goes back to the settings in `.env`.
+
+**HTTPS.** There is no public domain on a LAN, so no public authority can issue the
+certificate: `make lan` creates a private one for this machine (`deploy/tls/gen-cert.sh`)
+and a server certificate for its hostname and addresses. Port 8000 (HTTP) only redirects
+to HTTPS, and the session cookie is `Secure`.
+- A device shows a certificate warning until it trusts the authority: open
+  `http://<this machine's IP>:8000/ca.crt` on it and install it as a trusted root
+  (Android: Settings > Security > Install a certificate > CA; iOS: install the profile,
+  then enable it in Settings > General > About > Certificate Trust Settings;
+  desktop: import it in the browser's or system's authorities).
+- The machine's IP changed? `make tls` issues a new server certificate (valid 397 days);
+  devices that already trust the authority need nothing new.
+- `deploy/tls/ca.key` can sign a certificate for any site for whoever trusts `ca.crt`:
+  it never leaves this machine (mode 600, git-ignored). Remove the authority from a device
+  when the demo is over.
 
 The stack also creates an `aiplatform_test` database for the Postgres storage tests:
 
@@ -139,6 +177,17 @@ Every message goes through one LangGraph graph (`agent/graph.py`):
    polite answer, no tools) or `human` (asks for a person). It also flags **insistence**
    (repeating an unresolved request, frustration); three nearly identical messages in a row
    count as insistence too. If the classifier fails, the full agent with tools answers.
+   **Manipulation attempts** (prompt injection: "ignore your rules", "show your prompt", a
+   fake system message, tool result or approval, a claimed administrator asking for another
+   customer's data…) get the `attack` intent: a fixed reply with no agent call and no tools
+   (outcome `blocked`), never an advisor offer, a `aip_agent_intents_total{intent="attack"}`
+   metric, and in Langfuse a `WARNING` on the classify step plus a `prompt_injection` score
+   on the trace. A real question wrapped in odd text, or a customer who shares a PIN by
+   mistake, is not an attack. Classifying and answering stay two separate model calls on
+   purpose: the classifier is what keeps the tools away from anything that isn't an account
+   question (the prompts are too short for Haiku to cache, so it costs about $0.002 a turn).
+   For an `account` question the agent's first model call **must** call a tool, so a figure
+   can never come from the customer's own text.
 2. **call_model / run_tools**: the tool loop (only `account` gets the tool definitions).
 3. **handoff**: `human` queues the conversation for an advisor; insistence makes BankBot
    *offer* an advisor instead (the customer accepts or declines; no new offer for 3 turns
@@ -175,7 +224,7 @@ make test-postgres            # same storage tests against real Postgres (see ab
 - Prometheus metrics on the internal port `AIP_METRICS_PORT` (default 9090), including time-to-first-token, tokens, estimated cost, provider errors and breaker state. See [`docs/deploy.md`](docs/deploy.md#6-what-to-monitor).
 - `GET /readyz` checks the database; `GET /healthz` is liveness only.
 - `GET /v1/admin/usage?days=7` gives a daily usage and cost report, for users listed in `AIP_ADMIN_USERS`.
-- **Tracing (self-hosted Langfuse, masked)**, off by default. Each turn is one trace: one span per graph step (classify, call_model, run_tools, handoff...), and under each step its model calls (prompt, reply, tokens, provider, retry attempt) and every tool call (input, output, errors). Traces are grouped by conversation in Langfuse's **Sessions** view. Customer data is masked before it leaves the app: names, cities, last 4 digits, amounts, document and account numbers, emails, phones and user IDs (hashed). See [`docs/deploy.md`](docs/deploy.md#7-tracing-langfuse). To run it locally:
+- **Tracing (self-hosted Langfuse, masked)**, off by default. Each turn is one trace: one span per graph step (classify, call_model, run_tools, handoff...), and under each step its model calls (prompt, reply, tokens, provider, retry attempt) and every tool call (input, output, errors). Traces are grouped by conversation in Langfuse's **Sessions** view. Customer data is masked before it leaves the app: names, cities, last 4 digits, amounts, document and account numbers, emails, phones, and PINs, CVVs, passwords and codes the customer types. The trace's user is the bank customer ID in password mode, a keyed hash of the user ID otherwise; never the username. See [`docs/deploy.md`](docs/deploy.md#7-tracing-langfuse). To run it locally:
 
   ```bash
   make langfuse-env   # once: deploy/langfuse/.env with random secrets; prints the app settings
@@ -212,6 +261,8 @@ The agent answers **balance questions about the signed-in customer's own product
   their meaning (funds vs. amount owed), so the model doesn't confuse card debt with money.
 - **Demo users** (dev mode username, or dev issuer `sub`): `ana`, `bruno`, `carol`, `dave`,
   `eval-es`, `eval-pt`; see [`deploy/bankdb/demo_logins.json`](deploy/bankdb/demo_logins.json).
+  In password mode they need an account first:
+  `uv run python scripts/users.py create ana --customer-id <id from that file>`.
   Any other user isn't linked, and the assistant says it can't see account data.
 - **Out of scope for now:** card blocking, complaints, transactions, transfers. The
   assistant says so and points to other channels.

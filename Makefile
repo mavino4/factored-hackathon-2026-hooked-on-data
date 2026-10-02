@@ -1,4 +1,4 @@
-.PHONY: check lint test test-postgres smoke eval eval-banking banking-cases compare-models bank-db run migrate docker-build lan langfuse-env langfuse-up langfuse-down
+.PHONY: check lint test test-postgres smoke eval eval-banking eval-security banking-cases compare-models bank-db users users-relink run migrate docker-build lan tls langfuse-env langfuse-up langfuse-down
 
 check: lint test
 
@@ -16,6 +16,9 @@ test-postgres:  # needs `docker compose up -d db`
 eval-banking:  # banking evals on the provider in .env / AIP_PROVIDERS (needs `make bank-db`)
 	uv run python -m evals.run --dataset evals/banking.jsonl
 
+eval-security:  # manipulation attempts, shared secrets and controls through the whole assistant (needs `make bank-db`)
+	uv run python -m evals.run --dataset evals/security.jsonl
+
 banking-cases:  # regenerate evals/banking.jsonl from the transcripts + the bank DB
 	uv run python evals/import_transcripts.py ../data/call_transcripts
 	uv run python evals/build_banking_cases.py
@@ -25,6 +28,12 @@ compare-models:  # banking evals on the local Ollama models (llama3.2:3b vs qwen
 
 bank-db:  # load the simulated core-banking DB from ../data_clean (needs `docker compose up -d db`)
 	uv run --with pandas --with pyarrow python scripts/load_bank_db.py
+
+users:  # password accounts for the Active customers (needs `make bank-db` and `make migrate`); passwords go to credentials/
+	uv run --with pandas --with pyarrow python scripts/users.py provision
+
+users-relink:  # after `make bank-db`: link the accounts to their customers again
+	uv run python scripts/users.py relink
 
 migrate:
 	uv run alembic upgrade head
@@ -41,9 +50,15 @@ run:
 docker-build:
 	docker build -t aiplatform:dev .
 
-lan:  # web UI for other devices on a trusted LAN (dev login, local Ollama); see docker-compose.lan.yml
+lan: langfuse-up  # web UI over HTTPS for other devices on the LAN (password login, Claude, traced); see docker-compose.lan.yml
+	@[ -f deploy/tls/server.crt ] || ./deploy/tls/gen-cert.sh
 	docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d --build
-	@echo "Open http://$$(hostname -I | cut -d' ' -f1):8000 from another device on this network"
+	@echo "Open https://$$(hostname -I | cut -d' ' -f1) from another device on this network"
+	@echo "First time on a device: install http://$$(hostname -I | cut -d' ' -f1):8000/ca.crt as a trusted authority"
+
+tls:  # (re)issue the LAN demo's HTTPS certificate, e.g. after this machine's IP changed
+	./deploy/tls/gen-cert.sh
+	-docker compose -f docker-compose.yml -f docker-compose.lan.yml exec lb nginx -s reload
 
 langfuse-env:  # once: deploy/langfuse/.env with random secrets and the project API keys
 	./deploy/langfuse/gen-env.sh

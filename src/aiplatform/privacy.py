@@ -10,8 +10,9 @@ LangGraph state with the full history) and returns a JSON-safe copy where:
 - free-text PII patterns are replaced: cards (Luhn-checked), CPF/CNPJ, DNI/RUT, IBAN,
   CBU/CLABE and other long digit runs, emails, phones and, with ``mask_amounts``,
   money amounts;
-- user IDs (OIDC subjects) become a keyed hash: stable, so one customer's sessions can
-  be grouped, but not reversible without the key.
+- user IDs (OIDC subjects, usernames) become a keyed hash: stable, so one customer's
+  sessions can be grouped, but not reversible without the key. (In password mode the
+  trace's own user is the bank customer ID instead, see ``tracing.py``.)
 
 Values seen in a run live in a ContextVar opened with ``run_scope()`` around each graph
 run, so runs never share them.
@@ -62,15 +63,24 @@ def _card(match: re.Match) -> str:
     return "<CARD>" if _luhn_ok(digits) else "<ID>"  # a mistyped card is still sensitive
 
 
+SECRET = "<SECRET>"
+
 # Order matters: specific formats first, generic digit runs and amounts last.
 _PATTERNS: list[tuple[re.Pattern, Any]] = [
+    # Secrets a customer types although asked not to, recognized by the word before them:
+    # "mi PIN es 4821", "el código que me llegó por SMS es 884213", "senha: Banco2026!".
+    (re.compile(r"(?i)\b(pin|cvv2?|cvc|otp|c[oó]digo|code|token|clave)\b([^\d\n]{0,40}?)"
+                r"\d{3,8}(?!\d)"), rf"\1\2{SECRET}"),
+    (re.compile(r"(?i)\b(contrase[ñn]a|senha|password|passwd|clave)\b"
+                r"(\s*(?:es|é|is|:|=)\s*)\S+"), rf"\1\2{SECRET}"),
     (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "<EMAIL>"),
     (re.compile(r"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){3,7}(?: ?[A-Z0-9]{1,3})?\b"), "<IBAN>"),
     (re.compile(r"(?<![\w-])\d{4}(?:[ -]?\d{4}){2}[ -]?\d{1,7}(?![\w-])"), _card),
     (re.compile(r"\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b"), "<CNPJ>"),
     (re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b"), "<CPF>"),
     (re.compile(r"\b\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]\b"), "<RUT>"),
-    (re.compile(r"\b\d{1,2}\.\d{3}\.\d{3}\b"), "<DNI>"),
+    # Not the start of an amount ("2.456.357,90" is money, masked below).
+    (re.compile(r"\b\d{1,2}\.\d{3}\.\d{3}\b(?![.,]\d)"), "<DNI>"),
     (re.compile(r"\+\d{1,3}[\s.-]?(?:\(?\d{1,4}\)?[\s.-]?){1,3}\d{3,5}[\s.-]?\d{4}\b"), "<PHONE>"),
     (re.compile(r"(?<![\w.,])\(?\d{2,4}\)?[\s.-]?\d{4,5}[\s-]\d{4}\b"), "<PHONE>"),
     (re.compile(r"\b\d{8,}\b"), "<ID>"),  # CBU (22), CLABE (18), unformatted CPF/DNI...
@@ -139,6 +149,8 @@ class Masker:
     def _mask(self, data: Any, known: re.Pattern | None, key: str | None = None) -> Any:
         if key in USER_ID_KEYS and isinstance(data, str):
             return self.pseudonym(data)
+        if key == "model":  # a model ID's date is not an ID number
+            return data
         if key in IDENTITY_KEYS and data is not None:
             return IDENTITY_KEYS[key]
         if key in AMOUNT_KEYS and self._mask_amounts and data is not None:

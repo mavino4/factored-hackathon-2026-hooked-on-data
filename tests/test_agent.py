@@ -107,8 +107,10 @@ async def test_irreversible_tool_becomes_pending_and_runs_only_after_approval():
     assert ran == [TICKET]
     assert isinstance(events[0], ToolResult) and events[0].content == "Ticket #42 created"
     assert events[-1] == AgentDone("done", "Done: ticket #42.", [])
-    decision = conv.messages[-2]["content"]  # user [Approval] message, then assistant reply
+    note = conv.messages[-2]  # the app's [Approval] note, then the assistant's reply
+    decision = note["content"]
     assert decision.startswith("[Approval] The user APPROVED") and "Ticket #42" in decision
+    assert note["author"] == "system"  # written by the app: the customer can't forge it
 
     # Deciding twice never runs the tool again.
     with pytest.raises(ActionNotPending):

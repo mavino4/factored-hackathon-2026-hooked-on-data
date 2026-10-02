@@ -13,6 +13,13 @@ deploy/**/*.secret.yaml
 deploy/**/secrets/
 # Dev OIDC issuer signing key (scripts/dev_oidc.py)
 .dev-oidc/
+# LAN demo certificates (deploy/tls/gen-cert.sh); the keys are covered by *.key above
+deploy/tls/*.crt
+deploy/tls/*.srl
+# Red-team artifacts (.claude/skills/llm-redteaming): payloads and full responses
+pentest/
+# Generated passwords (scripts/users.py): the only plain-text copy, never committed
+credentials/
 
 # --- Python / uv ---------------------------------------------------------
 .venv/

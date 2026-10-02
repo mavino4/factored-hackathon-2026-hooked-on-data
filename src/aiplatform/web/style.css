@@ -77,6 +77,16 @@ button.icon { border: 0; background: none; font-size: 1.2rem; padding: .25rem .5
 .login-card h1 { margin: 0; font-size: 1.4rem; }
 .login-card form { display: grid; gap: .5rem; }
 .login-card input { padding: .6rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.dialog {
+  border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem;
+  background: var(--bg); color: inherit; width: min(22rem, calc(100vw - 32px));
+}
+.dialog::backdrop { background: rgb(0 0 0 / .4); }
+.dialog form { display: grid; gap: .5rem; }
+.dialog h2 { margin: 0 0 .25rem; font-size: 1.1rem; }
+.dialog p { margin: 0; }
+.dialog input { padding: .6rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.dialog-actions { display: flex; justify-content: flex-end; align-items: center; gap: 1rem; margin-top: .5rem; }
 
 /* Layout */
 .app { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
@@ -95,7 +105,7 @@ button.icon { border: 0; background: none; font-size: 1.2rem; padding: .25rem .5
 .conversation-list .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-footer {
   padding: .75rem 1rem; border-top: 1px solid var(--border);
-  display: flex; justify-content: space-between; gap: .5rem; align-items: center;
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; align-items: center;
 }
 .badge {
   font-size: .72rem; padding: .1rem .45rem; border-radius: 999px;

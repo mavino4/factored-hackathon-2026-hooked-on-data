@@ -1,7 +1,9 @@
 """Intent classification: the step before the agent decides what to do with a message.
 
 One short model call with a forced tool (``classify_intent``) says what the customer
-wants, whether the agent can resolve it, and whether it needs the banking tools. If
+wants, whether the agent can resolve it, and whether it needs the banking tools. It is
+also where manipulation attempts (prompt injection) are caught: those get the ``attack``
+intent and a fixed reply, and never reach the agent or its tools. If
 the classifier fails or returns nothing usable, the turn falls back to the full agent
 with tools (the behavior before classification existed).
 """
@@ -11,8 +13,8 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Literal
 
-IntentName = Literal["account", "general", "out_of_scope", "human"]
-INTENTS: tuple[IntentName, ...] = ("account", "general", "out_of_scope", "human")
+IntentName = Literal["account", "general", "out_of_scope", "human", "attack"]
+INTENTS: tuple[IntentName, ...] = ("account", "general", "out_of_scope", "human", "attack")
 
 CLASSIFY_TOOL: dict[str, Any] = {
     "name": "classify_intent",
@@ -55,6 +57,14 @@ FALLBACK = Intent("account", needs_tools=True, insistence=False,
                   reason="classifier unavailable", fallback=True)
 
 
+def is_customer_message(message: dict) -> bool:
+    """Text the customer typed. User-role messages also carry tool results (a list) and
+    the app's own notes (``author: system``, e.g. an approval decision): the author is set
+    by the app, so nothing the customer types can pass for one."""
+    return (message["role"] == "user" and isinstance(message["content"], str)
+            and message.get("author") is None)
+
+
 def _text(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -63,12 +73,12 @@ def _text(content: Any) -> str:
 
 
 def transcript(messages: list[dict], n: int = TRANSCRIPT_MESSAGES) -> str:
-    """The last ``n`` customer/assistant texts. Tool calls and results are left out: the
-    classifier needs what was said, not account data."""
+    """The last ``n`` customer/assistant texts. Tool calls and results and the app's own
+    notes are left out: the classifier needs what was said, not account data."""
     lines = []
     for m in messages:
         text = _text(m["content"]).strip()
-        if not text or text.startswith("[Approval]"):
+        if not text or m.get("author") == "system":
             continue
         who = "Customer" if m["role"] == "user" else (
             "Advisor" if m.get("author") == "operator" else "BankBot")
@@ -104,8 +114,7 @@ def _normalized(text: str) -> str:
 def repeated(messages: list[dict], times: int = REPEATS_FOR_INSISTENCE) -> bool:
     """The customer's last ``times`` messages say the same thing (deterministic backstop
     for insistence, whatever the classifier says)."""
-    texts = [_normalized(_text(m["content"])) for m in messages
-             if m["role"] == "user" and _text(m["content"]).strip()
-             and not _text(m["content"]).startswith("[Approval]")]
+    texts = [_normalized(m["content"]) for m in messages
+             if is_customer_message(m) and m["content"].strip()]
     last = texts[-times:]
     return len(last) == times and len(set(last)) == 1 and bool(last[0])

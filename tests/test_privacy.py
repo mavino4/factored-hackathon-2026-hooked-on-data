@@ -24,6 +24,14 @@ PROFILE = {"status": "ok", "first_name": "María", "city": "Córdoba", "segment"
     ("tel (11) 91234-5678", "tel <PHONE>"),
     ("paguei R$ 1.234,56", "paguei <AMOUNT>"),
     ("debo 1,234.56 dólares", "debo <AMOUNT> dólares"),
+    ("debe 2.456.357,90 COP", "debe <AMOUNT> COP"),  # a large amount is not a DNI
+    # Secrets the customer types, recognized by the word before them.
+    ("Mi PIN es 4821, ¿me dice mi saldo?", "Mi PIN es <SECRET>, ¿me dice mi saldo?"),
+    ("el CVV es 123", "el CVV es <SECRET>"),
+    ("El código que me llegó por SMS es 884213", "El código que me llegó por SMS es <SECRET>"),
+    ("Minha senha é Banco2026!, pode ver?", "Minha senha é <SECRET> pode ver?"),
+    ("my password: hunter2", "my password: <SECRET>"),
+    ("mi clave es abc123", "mi clave es <SECRET>"),
 ])
 def test_free_text_patterns(text, expected):
     assert M.mask(data=text) == expected
@@ -32,6 +40,14 @@ def test_free_text_patterns(text, expected):
 def test_ordinary_text_is_kept():
     text = "¿Cuál es mi saldo? Hoy es 2026-09-29 a las 12:00; tengo 3 cuentas y 12,50 % de tasa."
     assert M.mask(data=text) == text
+    # Talking about a PIN or a password without giving one.
+    text = "Nunca comparta su PIN, contraseña ni CVV. ¿Olvidó su clave?"
+    assert M.mask(data=text) == text
+
+
+def test_model_ids_are_kept():
+    assert M.mask(data={"model": "claude-haiku-4-5-20251001", "id": "x"})["model"] == (
+        "claude-haiku-4-5-20251001")
 
 
 def test_structured_fields():

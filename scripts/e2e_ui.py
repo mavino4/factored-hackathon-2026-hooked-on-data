@@ -4,8 +4,12 @@ Starts the API (and, for OIDC, the dev issuer) as real servers against a real mo
 provider and the core-banking DB, then drives the UI like a customer: sign in, ask for
 the credit-card balance (the figure is checked against the DB), reload, switch user and
 check that the new user sees only their own data. Runs the browser in Spanish (dev
-auth) and Portuguese (OIDC auth) to check the translated UI. Fails on any browser
-console error (including Content-Security-Policy violations).
+auth, then password auth) and Portuguese (OIDC auth) to check the translated UI. Fails on
+any unexpected browser console error (including Content-Security-Policy violations).
+
+Each run gets its own temporary database, so it starts without conversations and never
+touches the real ones; the password run's has two accounts made for the test. It covers a rejected sign-in, the session cookie
+(not readable by page scripts, survives a reload), changing the password and signing out.
 
     make bank-db                                                     # once
     uv run --with playwright python -m playwright install chromium   # once
@@ -15,6 +19,7 @@ console error (including Content-Security-Policy violations).
 
 import asyncio
 import contextlib
+import json
 import os
 import subprocess
 import sys
@@ -29,7 +34,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 BANK_URL = os.environ.setdefault(
     "AIP_BANK_DATABASE_URL", "postgresql+asyncpg://bank_reader:bank_reader@localhost:5432/bank")
 
+from aiplatform.accounts import Accounts, generate_password
 from aiplatform.banking.repository import PostgresBankRepository
+from aiplatform.storage.sql import SqlAccountStore, create_engine
+from aiplatform.storage.tables import metadata
 from evals.run import detect_language, mentions_amount
 
 API = "http://localhost:8765"
@@ -41,7 +49,10 @@ UI = {  # the labels the browser should show in each language
     "es": {"continue": "Continuar", "new_query": "+ Nueva consulta",
            "title_query": "Nueva consulta", "sign_in": "Iniciar sesión",
            "sign_out": "Cerrar sesión", "hello": "¡Hola",
-           "quick": "Saldo de mi tarjeta de crédito", "status": "Consultando"},
+           "quick": "Saldo de mi tarjeta de crédito", "status": "Consultando",
+           "invalid_credentials": "Usuario o contraseña incorrectos.",
+           "change_password": "Cambiar contraseña", "save": "Guardar",
+           "wrong_current_password": "La contraseña actual no es correcta."},
     "pt": {"continue": "Continuar", "new_query": "+ Nova consulta",
            "title_query": "Nova consulta", "sign_in": "Entrar", "sign_out": "Sair",
            "hello": "Olá", "quick": "Saldo do meu cartão de crédito", "status": "Consultando"},
@@ -118,7 +129,8 @@ def ask_balance(page: Page, lang: str, user: str, truth: dict[str, dict]) -> Non
     """Ask with the quick-action button; the answer must be the customer's own figure."""
     ui = UI[lang]
     with page.expect_request(lambda r: r.method == "POST" and "/agent-runs" in r.url) as sent:
-        page.get_by_role("button", name=ui["quick"]).click()
+        # exact: an earlier query's title in the sidebar may contain the same words
+        page.get_by_role("button", name=ui["quick"], exact=True).click()
     sent_language = sent.value.post_data_json.get("language")
     assert sent_language == lang, f"request sent language {sent_language!r}, UI shows {lang!r}"
     status = page.locator(".status")
@@ -144,11 +156,11 @@ def ask_balance(page: Page, lang: str, user: str, truth: dict[str, dict]) -> Non
         print(f"  WARN: figure shown to {user} differs from the DB (model quality)")
 
 
-def run_dev_mode(browser, truth) -> list[str]:
+def run_dev_mode(browser, truth, database_url: str) -> list[str]:
     print("\n[dev auth, browser in es-ES]")
     errors: list[str] = []
     ui = UI["es"]
-    with api_server({"AIP_AUTH_MODE": "dev"}):
+    with api_server({"AIP_AUTH_MODE": "dev", "AIP_DATABASE_URL": database_url}):
         page = browser.new_page(locale="es-ES")
         watch_console(page, errors)
         page.goto(API)
@@ -192,7 +204,120 @@ def run_dev_mode(browser, truth) -> list[str]:
     return errors
 
 
-def run_oidc_mode(browser, truth) -> list[str]:
+async def new_database(directory: str, name: str, users: tuple[str, ...] = ()
+                       ) -> tuple[str, dict[str, str]]:
+    """An empty app database, with a password account per user. Returns its URL and the
+    passwords."""
+    url = f"sqlite+aiosqlite:///{directory}/{name}.db"
+    customers = json.loads(Path("deploy/bankdb/demo_logins.json").read_text())
+    engine = create_engine(url)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
+        accounts = Accounts(SqlAccountStore(engine))
+        passwords = {user: generate_password() for user in users}
+        for user, password in passwords.items():
+            await accounts.create_user(user, password, customers[user]["customer_id"])
+        return url, passwords
+    finally:
+        await engine.dispose()
+
+
+def sign_in(page: Page, user: str, password: str) -> None:
+    page.locator("#login-user").fill(user)
+    page.locator("#login-password").fill(password)
+    page.get_by_role("button", name=UI["es"]["sign_in"]).click()
+
+
+def run_password_mode(browser, truth, database_url: str,
+                      passwords: dict[str, str]) -> list[str]:
+    print("\n[password auth (session cookie), browser in es-ES]")
+    errors: list[str] = []
+    ui = UI["es"]
+    env = {"AIP_AUTH_MODE": "password", "AIP_DATABASE_URL": database_url,
+           "AIP_LOGIN_REQUESTS_PER_MINUTE": "60"}
+    with api_server(env):
+        page = browser.new_page(locale="es-ES")
+        watch_console(page, errors)
+        page.goto(API)
+        expect(page.locator("#password-login")).to_be_visible()
+        expect(page.locator("#dev-login")).to_be_hidden()
+        expect(page.locator("#oidc-login")).to_be_hidden()
+
+        # A wrong password and an unknown user get the same answer and stay signed out.
+        sign_in(page, "ana", "not-the-password")
+        expect(page.locator("#login-error")).to_have_text(ui["invalid_credentials"])
+        sign_in(page, "nadie", "not-the-password")
+        expect(page.locator("#login-error")).to_have_text(ui["invalid_credentials"])
+        expect(page.locator("#app")).to_be_hidden()
+        assert page.request.get(f"{API}/v1/me").status == 401
+        # The header that dev mode trusts opens nothing here.
+        assert page.request.get(f"{API}/v1/me", headers={"X-User-Id": "ana"}).status == 401
+        print("  wrong password and unknown user rejected with the same message")
+
+        sign_in(page, "ANA", passwords["ana"])  # usernames ignore case
+        expect(page.locator("#user-name")).to_have_text("ana", timeout=10_000)
+        assert_welcome(page, "es", "ana", truth)
+        cookie = next(c for c in page.context.cookies() if c["name"] == "aip_session")
+        assert cookie["httpOnly"] and cookie["sameSite"] == "Strict", cookie
+        assert "aip_session" not in page.evaluate("document.cookie")
+        stored = page.evaluate("JSON.stringify([localStorage, sessionStorage])")
+        assert passwords["ana"] not in stored and cookie["value"] not in stored
+        print("  signed in: HttpOnly SameSite=Strict cookie, nothing kept in page storage")
+        ask_balance(page, "es", "ana", truth)
+
+        page.reload()  # the session is in the cookie, so a reload stays signed in
+        expect(page.locator("#user-name")).to_have_text("ana", timeout=10_000)
+        assert_welcome(page, "es", "ana", truth)
+        print("  still signed in after reload")
+
+        # Change the password: the current one must be right.
+        new_password = generate_password()
+        page.get_by_role("button", name=ui["change_password"]).click()
+        expect(page.locator("#password-dialog")).to_be_visible()
+        page.locator("#current-password").fill("not-the-password")
+        page.locator("#new-password").fill(new_password)
+        page.get_by_role("button", name=ui["save"]).click()
+        expect(page.locator("#password-error")).to_have_text(ui["wrong_current_password"])
+        page.locator("#current-password").fill(passwords["ana"])
+        page.get_by_role("button", name=ui["save"]).click()
+        expect(page.locator("#password-dialog")).to_be_hidden()
+        expect(page.locator("#user-name")).to_have_text("ana")  # this session goes on
+        print("  password changed")
+
+        page.get_by_role("button", name=ui["sign_out"]).click()
+        expect(page.locator("#password-login")).to_be_visible(timeout=10_000)
+        assert not [c for c in page.context.cookies() if c["name"] == "aip_session"]
+        # The signed-out session is dead on the server too, not just forgotten here.
+        replay = page.request.get(f"{API}/v1/me",
+                                  headers={"Cookie": f"aip_session={cookie['value']}"})
+        assert replay.status == 401, "a copied session cookie still works after sign-out"
+        sign_in(page, "ana", passwords["ana"])
+        expect(page.locator("#login-error")).to_have_text(ui["invalid_credentials"])
+        print("  signed out: session revoked, old password rejected")
+
+        sign_in(page, "bruno", passwords["bruno"])
+        expect(page.locator("#user-name")).to_have_text("bruno", timeout=10_000)
+        page.wait_for_timeout(500)
+        expect(page.locator("#conversation-list li")).to_have_count(0)
+        assert truth["ana"]["first_name"] not in page.locator("body").inner_text(), \
+            "bruno sees ana's name"
+        print("  switched to bruno: clean session")
+        assert_welcome(page, "es", "bruno", truth)
+        ask_balance(page, "es", "bruno", truth)
+
+        page.get_by_role("button", name=ui["sign_out"]).click()
+        expect(page.locator("#password-login")).to_be_visible(timeout=10_000)
+        sign_in(page, "ana", new_password)
+        expect(page.locator("#user-name")).to_have_text("ana", timeout=10_000)
+        expect(page.locator("#conversation-list li")).to_have_count(1)  # her own query
+        print("  ana signs in with the new password and finds her own history")
+        page.close()
+    # The browser logs every 401/403 response; here they are the rejections under test.
+    return [e for e in errors if "status of 401" not in e and "status of 403" not in e]
+
+
+def run_oidc_mode(browser, truth, database_url: str) -> list[str]:
     print("\n[OIDC auth (authorization code + PKCE via the dev issuer), browser in pt-BR]")
     errors: list[str] = []
     ui = UI["pt"]
@@ -200,7 +325,8 @@ def run_oidc_mode(browser, truth) -> list[str]:
                     {},
                     f"{ISSUER}.well-known/openid-configuration")
     oidc_env = {"AIP_AUTH_MODE": "oidc", "AIP_OIDC_ISSUER": ISSUER,
-                "AIP_OIDC_AUDIENCE": "aiplatform-dev", "AIP_OIDC_CLIENT_ID": "web-ui"}
+                "AIP_OIDC_AUDIENCE": "aiplatform-dev", "AIP_OIDC_CLIENT_ID": "web-ui",
+                "AIP_DATABASE_URL": database_url}
     with issuer, api_server(oidc_env):
         page = browser.new_page(locale="pt-BR")
         watch_console(page, errors)
@@ -234,10 +360,17 @@ def run_oidc_mode(browser, truth) -> list[str]:
 
 def main() -> int:
     truth = asyncio.run(bank_truth(["ana", "bruno"]))
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        errors = run_dev_mode(browser, truth) + run_oidc_mode(browser, truth)
-        browser.close()
+    with tempfile.TemporaryDirectory(prefix="e2e-db-") as tmp:
+        # Made before Playwright starts: its event loop doesn't allow asyncio.run.
+        dev_db, _ = asyncio.run(new_database(tmp, "dev"))
+        password_db, passwords = asyncio.run(new_database(tmp, "password", ("ana", "bruno")))
+        oidc_db, _ = asyncio.run(new_database(tmp, "oidc"))
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            errors = (run_dev_mode(browser, truth, dev_db)
+                      + run_password_mode(browser, truth, password_db, passwords)
+                      + run_oidc_mode(browser, truth, oidc_db))
+            browser.close()
     if errors:
         print("\nFAIL: browser console errors:")
         for error in errors:
