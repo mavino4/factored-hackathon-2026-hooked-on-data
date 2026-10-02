@@ -11,6 +11,10 @@ HTTP_LATENCY = Histogram(
 REJECTED = Counter(
     "aip_requests_rejected_total", "Requests rejected before reaching the model", ["reason"])
 
+# Customer messages by classified intent; "attack" counts manipulation attempts.
+AGENT_INTENTS = Counter(
+    "aip_agent_intents_total", "Customer messages by classified intent", ["intent"])
+
 LLM_TTFT = Histogram(
     "aip_llm_time_to_first_token_seconds", "Model call start to first text token",
     ["route", "provider"], buckets=(0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 20, 30, 60))

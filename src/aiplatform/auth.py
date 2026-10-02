@@ -31,6 +31,8 @@ class AuthError(Exception):
 class Principal:
     user_id: str
     claims: dict[str, Any] = field(default_factory=dict)
+    # The bank customer behind the user, when sign-in knows it (password mode).
+    customer_id: str | None = None
 
 
 def fetch_json(url: str, timeout: float = 5.0) -> dict:

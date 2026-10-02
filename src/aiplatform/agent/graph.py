@@ -4,6 +4,7 @@ tools), or hand the conversation to a human.
     START ─┬─ open handoff ──> wait_for_human ──> END      (a human answers, not the bot)
            ├─ decision ──────> apply_decision ──┐
            └─ new message ───> classify ─┬─ human ──> handoff ──> END
+                                         ├─ attack ─> refuse_attack ──> END   (fixed reply)
                                          └─ account / general / out_of_scope
                                                         │
                            ┌────────────────────────────┴──> call_model ──> run_tools ──┐
@@ -28,6 +29,7 @@ from typing import Any, NamedTuple, TypedDict
 import anthropic
 from langgraph.graph import END, START, StateGraph
 
+from aiplatform import metrics
 from aiplatform.agent import intent as intents
 from aiplatform.agent.actions import ActionStore, PendingAction
 from aiplatform.agent.events import (
@@ -49,7 +51,7 @@ from aiplatform.chat.repository import Conversation, ConversationRepository
 from aiplatform.graph_stream import emitter
 from aiplatform.llm.gateway import AIGateway, Completed, GatewayError, TextDelta
 from aiplatform.llm.models import ROUTES
-from aiplatform.tracing import register_sensitive, tool_span, traced_node
+from aiplatform.tracing import flag_prompt_injection, register_sensitive, tool_span, traced_node
 from aiplatform.usage import UsageEvent, UsageStore
 
 log = logging.getLogger(__name__)
@@ -71,14 +73,35 @@ HANDOFF_TEXT = {
 }
 
 
+# Fixed reply to a manipulation attempt (no model call): it says what the bot is for and
+# gives the attacker nothing to iterate on.
+ATTACK_TEXT = {
+    "es": ("No puedo ayudarle con esa solicitud. Estoy aquí para consultar los saldos y el "
+           "estado de sus productos y para resolver dudas sobre productos bancarios."),
+    "pt": ("Não posso ajudar com essa solicitação. Estou aqui para consultar os saldos e a "
+           "situação dos seus produtos e para tirar dúvidas sobre produtos bancários."),
+    "en": ("I can't help with that request. I'm here to check the balances and status of "
+           "your products and to answer questions about banking products."),
+}
+
+# Force a tool call on the first model call of an account question: figures must come
+# from the bank, not from anything the customer typed.
+REQUIRE_TOOL = {"type": "any"}
+
+# How the app's own note about an approval decision starts (stored with author "system").
+APPROVAL_MARK = "[Approval]"
+
+
 def handoff_text(language: str | None) -> str:
     return HANDOFF_TEXT.get(language or "es", HANDOFF_TEXT["es"])
 
 
+def attack_text(language: str | None) -> str:
+    return ATTACK_TEXT.get(language or "es", ATTACK_TEXT["es"])
+
+
 def customer_turns_since(messages: list[dict], index: int) -> int:
-    return sum(1 for m in messages[index:]
-               if m["role"] == "user" and isinstance(m["content"], str)
-               and not m["content"].startswith("[Approval]"))
+    return sum(1 for m in messages[index:] if intents.is_customer_message(m))
 
 
 def awaiting_approval_text(action: PendingAction) -> str:
@@ -89,7 +112,8 @@ def awaiting_approval_text(action: PendingAction) -> str:
 
 def decision_text(action: PendingAction, result: str | None) -> str:
     # Sent as a user-role message: history stays append-only (tool results are never edited).
-    header = f"[Approval] The user {action.status.upper()} action {action.id} ({action.tool_name})."
+    header = (f"{APPROVAL_MARK} The user {action.status.upper()} action {action.id} "
+              f"({action.tool_name}).")
     if result is None:
         return header + " It was not executed."
     return f"{header} It was executed. Result:\n{result}"
@@ -161,7 +185,7 @@ async def _invoke_tool(tool: Tool, args: dict[str, Any], ctx: ToolContext) -> tu
 
 def _last_customer_text(conv: Conversation) -> str | None:
     for m in reversed(conv.messages):
-        if m["role"] == "user" and isinstance(m["content"], str):
+        if intents.is_customer_message(m):
             return m["content"]
     return None
 
@@ -203,10 +227,28 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         else:
             await record(state, completed, classify_route.name)
             intent = intents.parse(completed.message)
+        metrics.AGENT_INTENTS.labels(intent.name).inc()
+        if intent.name == "attack":
+            # Repeating an attack is not a customer who needs a person: no advisor offer.
+            intent = replace(intent, needs_tools=False, insistence=False)
+            log.warning("manipulation attempt blocked", extra={
+                "conversation_id": conv.id, "reason": intent.reason})
+            flag_prompt_injection(intent.reason)
+            return {"intent": intent, "use_tools": False}
         if not intent.insistence and intents.repeated(conv.messages):
             intent = replace(intent, insistence=True)
         use_tools = intent.name == "account" or intent.needs_tools
         return {"intent": intent, "use_tools": use_tools}
+
+    @traced_node("refuse_attack", lambda s: {"reason": s["intent"].reason})
+    async def refuse_attack(state: AgentState) -> dict:
+        """A manipulation attempt: the fixed reply, without the agent or its tools."""
+        emit, conv = emitter(), state["conv"]
+        text = attack_text(state["language"])
+        await repo.append(conv, {"role": "assistant", "content": [{"type": "text", "text": text}]})
+        await emit(AgentText(text))
+        await emit(AgentDone("blocked", text, []))
+        return {}
 
     @traced_node("handoff", lambda s: {"reason": s["intent"].reason if s["intent"] else None})
     async def handoff(state: AgentState) -> dict:
@@ -240,7 +282,9 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
                                                       ToolContext(user_id, conv.id))
             await emit(ToolResult(action.tool_use_id, action.tool_name, is_error, content))
             result = f"ERROR: {content}" if is_error else content
-        await repo.append(conv, {"role": "user", "content": decision_text(action, result)})
+        # author "system": the app wrote this, not the customer (see is_customer_message).
+        await repo.append(conv, {"role": "user", "author": "system",
+                                 "content": decision_text(action, result)})
         return {}
 
     @traced_node("call_model", lambda s: {
@@ -250,11 +294,16 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         emit = emitter()
         conv = state["conv"]
         check_history_size(conv.messages)
+        intent = state["intent"]
+        must_look_up = (state["use_tools"] and bool(definitions) and state["iterations"] == 0
+                        and intent is not None and intent.name == "account"
+                        and not intent.fallback)
         completed: Completed | None = None
         async for event in gateway.stream(
                 route, system=AGENT_SYSTEM_PROMPT, messages=conv.messages,
                 tools=definitions if state["use_tools"] else None, conversation_id=conv.id,
-                system_suffix=state["suffix"]):
+                system_suffix=state["suffix"],
+                tool_choice=REQUIRE_TOOL if must_look_up else None):
             if isinstance(event, TextDelta):
                 await emit(AgentText(event.text))
             else:
@@ -354,7 +403,8 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         return "apply_decision" if state["decision"] else "classify"
 
     def after_classify(state: AgentState) -> str:
-        return "handoff" if state["intent"].name == "human" else "call_model"
+        return {"human": "handoff", "attack": "refuse_attack"}.get(
+            state["intent"].name, "call_model")
 
     def next_call(state: AgentState) -> str:
         return "call_model" if state["iterations"] < max_iterations else "finish"
@@ -370,14 +420,17 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
     graph.add_node("wait_for_human", wait_for_human)
     graph.add_node("classify", classify)
     graph.add_node("handoff", handoff)
+    graph.add_node("refuse_attack", refuse_attack)
     graph.add_node("apply_decision", apply_decision)
     graph.add_node("call_model", call_model)
     graph.add_node("run_tools", run_tools)
     graph.add_node("finish", finish)
     graph.add_conditional_edges(START, start, ["wait_for_human", "apply_decision", "classify"])
     graph.add_edge("wait_for_human", END)
-    graph.add_conditional_edges("classify", after_classify, ["handoff", "call_model"])
+    graph.add_conditional_edges("classify", after_classify,
+                                ["handoff", "refuse_attack", "call_model"])
     graph.add_edge("handoff", END)
+    graph.add_edge("refuse_attack", END)
     graph.add_edge("apply_decision", "call_model")
     graph.add_conditional_edges("call_model", after_model, ["finish", "run_tools", "call_model"])
     graph.add_conditional_edges("run_tools", next_call, ["call_model", "finish"])

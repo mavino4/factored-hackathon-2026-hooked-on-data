@@ -3,8 +3,9 @@
 from dataclasses import dataclass
 from typing import Any, Literal
 
+# "blocked": the message was a manipulation attempt and got the fixed reply (no agent call).
 Outcome = Literal["done", "approval_required", "refused", "truncated", "max_iterations",
-                  "handoff"]
+                  "handoff", "blocked"]
 
 
 @dataclass

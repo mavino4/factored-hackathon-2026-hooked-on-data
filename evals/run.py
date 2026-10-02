@@ -26,10 +26,15 @@ from typing import Any
 # Evals don't serve HTTP, so auth settings are irrelevant; don't require OIDC config.
 os.environ.setdefault("AIP_AUTH_MODE", "dev")
 
+from aiplatform.agent.actions import InMemoryActionStore
+from aiplatform.agent.events import AgentDone, ToolCall
+from aiplatform.agent.loop import AgentRunner
 from aiplatform.agent.tools import Tool, ToolContext
 from aiplatform.banking.repository import PostgresBankRepository
 from aiplatform.banking.tools import make_bank_tools
+from aiplatform.chat.inflight import InFlight
 from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, reply_language
+from aiplatform.chat.repository import InMemoryConversationRepository
 from aiplatform.config import get_settings
 from aiplatform.llm.gateway import AIGateway
 from aiplatform.llm.models import ROUTES, prices_for
@@ -109,6 +114,7 @@ class Answer:
     text: str
     tools_called: list[str] = field(default_factory=list)
     tools_executed: list[str] = field(default_factory=list)
+    outcome: str | None = None  # how the run ended ("assistant" route only)
 
 
 @dataclass
@@ -228,6 +234,10 @@ def check_answer(answer: Answer, checks: dict[str, Any]) -> list[str]:
         failures.append(f"called {tool}")
     if (tool := checks.get("must_not_execute_tool")) and tool in answer.tools_executed:
         failures.append(f"executed {tool} without approval")
+    if (outcome := checks.get("outcome")) and answer.outcome != outcome:
+        failures.append(f"outcome {answer.outcome} != {outcome}")
+    if (outcome := checks.get("outcome_not")) and answer.outcome == outcome:
+        failures.append(f"outcome is {outcome}")
     return failures
 
 
@@ -307,6 +317,46 @@ async def run_agent(gateway: AIGateway, case: Case, usage: Usage,
     return answer
 
 
+class _UsageRecorder:
+    """The usage store of an ``assistant`` run: adds every model call to the case's totals."""
+
+    def __init__(self, usage: Usage):
+        self._usage = usage
+
+    async def record(self, event) -> None:
+        self._usage.input_tokens += (event.input_tokens + event.cache_read_tokens
+                                     + event.cache_write_tokens)
+        self._usage.output_tokens += event.output_tokens
+        self._usage.cost += prices_for(event.model).cost(
+            input_tokens=event.input_tokens, output_tokens=event.output_tokens,
+            cache_read_tokens=event.cache_read_tokens,
+            cache_write_tokens=event.cache_write_tokens)
+
+    async def tokens_used_today(self, user_id: str) -> int:
+        return 0
+
+
+async def run_assistant(gateway: AIGateway, case: Case, usage: Usage,
+                        tools: list[Tool] = GENERAL_TOOLS, user_id: str = "eval-user") -> Answer:
+    """The whole assistant as the API runs it: intent classification, then the agent graph
+    (the ``agent`` route calls the model directly, without the classifier). The customer
+    turns in ``history`` are sent first, one by one; the checks apply to the last answer."""
+    repo = InMemoryConversationRepository()
+    conv = await repo.create(user_id, "agent")
+    runner = AgentRunner(gateway, repo, _UsageRecorder(usage), InFlight(),
+                         InMemoryActionStore(), tools)
+    earlier = [m["content"] for m in case.history if m["role"] == "user"]
+    answer = Answer(text="")
+    for text in [*earlier, case.input]:
+        answer = Answer(text="")
+        async for event in runner.run(user_id, conv.id, text, case.ui_language):
+            if isinstance(event, ToolCall):
+                answer.tools_called.append(event.name)
+            elif isinstance(event, AgentDone):
+                answer.text, answer.outcome = event.text, event.outcome
+    return answer
+
+
 async def judge(gateway: AIGateway, case: Case, answer: Answer, usage: Usage) -> dict:
     prompt = (f"Question:\n{case.input}\n\nAnswer:\n{answer.text}\n\n"
               f"Rubric:\n{case.rubric}\n\nReply with only the JSON object.")
@@ -322,7 +372,9 @@ async def run_case(gateway: AIGateway, case: Case, use_judge: bool,
     start = time.perf_counter()
     verdict = None
     try:
-        if case.route == "agent":
+        if case.route == "assistant":
+            answer = await run_assistant(gateway, case, usage, tools, user_id=case.user)
+        elif case.route == "agent":
             answer = await run_agent(gateway, case, usage, tools, user_id=case.user)
         else:
             answer = await run_chat(gateway, case, usage)

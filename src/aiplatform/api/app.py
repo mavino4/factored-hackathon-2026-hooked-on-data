@@ -9,18 +9,26 @@ import urllib.parse
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
 import anthropic
 import sqlalchemy as sa
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import start_http_server
 from pydantic import BaseModel, Field
 
 from aiplatform import metrics
+from aiplatform.accounts import (
+    MIN_PASSWORD_LENGTH,
+    Accounts,
+    InMemoryAccountStore,
+    InvalidCredentials,
+    WeakPassword,
+)
 from aiplatform.agent.actions import ActionNotPending, InMemoryActionStore
 from aiplatform.agent.handoffs import HandoffNotFound, InMemoryHandoffStore
 from aiplatform.agent.loop import (
@@ -35,7 +43,7 @@ from aiplatform.agent.loop import (
     ToolResult,
 )
 from aiplatform.agent.tools import Tool
-from aiplatform.auth import AuthError, OIDCVerifier
+from aiplatform.auth import AuthError, OIDCVerifier, Principal
 from aiplatform.banking.repository import BankRepository, NotLinked, PostgresBankRepository
 from aiplatform.banking.tools import make_bank_tools
 from aiplatform.chat.history import ConversationTooLong
@@ -48,6 +56,7 @@ from aiplatform.llm.providers import build_clients, close_clients
 from aiplatform.logging import configure_logging, request_id
 from aiplatform.ratelimit import RateLimiter
 from aiplatform.storage.sql import (
+    SqlAccountStore,
     SqlActionStore,
     SqlConversationRepository,
     SqlHandoffStore,
@@ -90,6 +99,16 @@ class OperatorMessage(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
 
+class Credentials(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=1, max_length=256)
+
+
 def create_app(settings: Settings | None = None, gateway: AIGateway | None = None,
                tools: list[Tool] | None = None,
                verifier: OIDCVerifier | None = None,
@@ -109,10 +128,12 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             engine = create_engine(settings.database_url)
             repo, usage = SqlConversationRepository(engine), SqlUsageStore(engine)
             actions, handoffs = SqlActionStore(engine), SqlHandoffStore(engine)
+            account_store = SqlAccountStore(engine)
         else:
             log.warning("AIP_DATABASE_URL not set: using in-memory storage (data is lost on restart)")
             repo, usage = InMemoryConversationRepository(), InMemoryUsageStore()
             actions, handoffs = InMemoryActionStore(), InMemoryHandoffStore()
+            account_store = InMemoryAccountStore()
         inflight = InFlight()
         metrics_server = None
         if settings.metrics_port:
@@ -124,6 +145,12 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         app.state.inflight = inflight
         app.state.quota = TokenQuota(usage, settings.user_tokens_per_day)
         app.state.limiter = RateLimiter(settings.user_requests_per_minute)
+        app.state.login_limiter = RateLimiter(settings.login_requests_per_minute)
+        app.state.accounts = Accounts(
+            account_store, idle=timedelta(minutes=settings.session_idle_minutes),
+            max_age=timedelta(hours=settings.session_max_hours),
+            max_failures=settings.login_max_failures,
+            lock_for=timedelta(minutes=settings.login_lock_minutes))
         tracing = Tracing.from_settings(settings)
         bank = bank_repo
         if bank is None and settings.bank_database_url is not None:
@@ -180,18 +207,26 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
                 time.perf_counter() - started)
             request_id.reset(token)
 
-    if settings.auth_mode == "dev":
+    if settings.auth_mode != "oidc":
         verifier = None
     elif verifier is None:
         verifier = OIDCVerifier(settings.oidc_issuer, settings.oidc_audience,
                                 jwks_url=settings.oidc_jwks_url)
 
     async def current_user(request: Request) -> str:
-        if verifier is None:  # dev mode: trust a header (refused in production by Settings)
+        if settings.auth_mode == "dev":  # trust a header (refused in production by Settings)
             user_id = request.headers.get("x-user-id")
             if not user_id:
                 raise HTTPException(401, "missing X-User-Id header (dev auth mode)")
+            request.state.principal = Principal(user_id)
             return user_id
+        if settings.auth_mode == "password":
+            token = request.cookies.get(SESSION_COOKIE)
+            principal = await request.app.state.accounts.resolve(token) if token else None
+            if principal is None:
+                raise HTTPException(401, "not signed in")
+            request.state.principal = principal
+            return principal.user_id
         scheme, _, token = request.headers.get("authorization", "").partition(" ")
         if scheme.lower() != "bearer" or not token:
             raise HTTPException(401, "missing bearer token",
@@ -240,6 +275,53 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         return {"auth_mode": settings.auth_mode, "oidc_issuer": settings.oidc_issuer,
                 "oidc_client_id": settings.oidc_client_id,
                 "oidc_audience": settings.oidc_audience}
+
+    def password_mode() -> None:
+        if settings.auth_mode != "password":
+            raise HTTPException(404, "password sign-in is not enabled")
+
+    @app.post("/v1/auth/login", dependencies=[Depends(password_mode)])
+    async def login(body: Credentials, request: Request, response: Response) -> dict:
+        ip = _client_ip(request)
+        if not request.app.state.login_limiter.allow(ip):
+            metrics.REJECTED.labels("login_rate_limit").inc()
+            raise HTTPException(429, "too many sign-in attempts", headers={"Retry-After": "30"})
+        try:
+            token, principal = await request.app.state.accounts.login(
+                body.username, body.password, ip)
+        except InvalidCredentials:
+            # One answer for every failure: unknown user, wrong password, locked, disabled.
+            raise HTTPException(401, "invalid username or password") from None
+        # HttpOnly: page scripts can't read it. SameSite=Strict: other sites can't send it.
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="strict",
+                            secure=settings.session_cookie_secure, path="/",
+                            max_age=settings.session_max_hours * 3600)
+        return {"user_id": principal.user_id}
+
+    @app.post("/v1/auth/logout", dependencies=[Depends(password_mode)], status_code=204)
+    async def logout(request: Request, response: Response) -> None:
+        token = request.cookies.get(SESSION_COOKIE)
+        if token:
+            await request.app.state.accounts.logout(token, _client_ip(request))
+        response.delete_cookie(SESSION_COOKIE, path="/")
+
+    @app.post("/v1/auth/password", dependencies=[Depends(password_mode)], status_code=204)
+    async def change_password(body: PasswordChange, request: Request,
+                              user_id: Annotated[str, Depends(current_user)]) -> None:
+        """Change the signed-in user's password; their other sessions are signed out."""
+        ip = _client_ip(request)
+        if not request.app.state.login_limiter.allow(ip):
+            metrics.REJECTED.labels("login_rate_limit").inc()
+            raise HTTPException(429, "too many attempts", headers={"Retry-After": "30"})
+        try:
+            await request.app.state.accounts.change_password(
+                user_id, body.current_password, body.new_password,
+                token=request.cookies.get(SESSION_COOKIE), ip=ip)
+        except WeakPassword:
+            raise HTTPException(422, f"the new password needs at least {MIN_PASSWORD_LENGTH} "
+                                     "characters and can't be the username") from None
+        except InvalidCredentials:
+            raise HTTPException(403, "the current password is wrong") from None
 
     @app.get("/readyz")
     async def readyz(request: Request):
@@ -313,7 +395,9 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
     async def run_agent(conversation_id: str, body: UserMessage, request: Request,
                         user_id: Annotated[str, Depends(admit)]) -> StreamingResponse:
         conv = await get_conversation(request, conversation_id, user_id, "agent")
-        return _stream(request.app.state.agent.run(user_id, conv.id, body.text, body.language))
+        return _stream(request.app.state.agent.run(
+            user_id, conv.id, body.text, body.language,
+            customer_id=request.state.principal.customer_id))
 
     @app.post("/v1/conversations/{conversation_id}/actions/{action_id}")
     async def decide_action(conversation_id: str, action_id: str, body: Decision,
@@ -325,7 +409,7 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             raise HTTPException(404, "no pending action with this id")
         return _stream(request.app.state.agent.decide(
             user_id, conv.id, action_id, approve=body.decision == "approve",
-            language=body.language))
+            language=body.language, customer_id=request.state.principal.customer_id))
 
     @app.post("/v1/conversations/{conversation_id}/handoff")
     async def answer_handoff(conversation_id: str, body: HandoffAnswer, request: Request,
@@ -400,6 +484,7 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
 
 
 _REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+SESSION_COOKIE = "aip_session"
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
@@ -417,6 +502,12 @@ def _security_headers(settings: Settings) -> dict[str, str]:
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
     }
+
+
+def _client_ip(request: Request) -> str:
+    # X-Real-IP is set by the load balancer (deploy/nginx*.conf); used for the sign-in rate
+    # limit and the audit trail, never for access decisions.
+    return request.headers.get("x-real-ip") or (request.client.host if request.client else "")
 
 
 def _handoff(h) -> dict:

@@ -9,6 +9,9 @@ phones, addresses, income or credit scores; product numbers keep only the last 4
     uv run --with pandas --with pyarrow python scripts/load_bank_db.py            # full data
     uv run --with pandas --with pyarrow python scripts/load_bank_db.py --sample 5000
 
+Reloading empties bank.customer_logins: if password accounts exist (scripts/users.py), run
+`make users-relink` afterwards.
+
 Demo/test users (token `sub` -> customer) are kept in deploy/bankdb/demo_logins.json.
 If the file is missing (or with --repick) they are chosen deterministically so each one
 covers a different case, and the file is written for review.

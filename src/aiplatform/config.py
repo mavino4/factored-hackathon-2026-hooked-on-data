@@ -17,15 +17,30 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Authentication. "oidc": require a valid Bearer JWT from the configured issuer.
+    # "password": username + password accounts with a session cookie (accounts.py); the
+    # accounts are created with scripts/users.py.
     # "dev": trust the X-User-Id header - local development only, refused in production.
-    auth_mode: Literal["oidc", "dev"] = "oidc"
+    auth_mode: Literal["oidc", "password", "dev"] = "oidc"
     oidc_issuer: str | None = None  # e.g. https://your-tenant.eu.auth0.com/
     oidc_audience: str | None = None  # the API identifier the tokens are issued for
     oidc_jwks_url: str | None = None  # optional; discovered from the issuer when unset
     # Public client ID of the web UI's OIDC application (browser login with PKCE).
     oidc_client_id: str | None = None
 
-    # User IDs (token `sub`, or X-User-Id in dev mode) allowed to read /v1/admin/*.
+    # Password mode. A session ends after this long without a request, and at the latest
+    # this long after sign-in.
+    session_idle_minutes: int = 30
+    session_max_hours: int = 8
+    # Consecutive failed sign-ins that lock an account, and for how long.
+    login_max_failures: int = 5
+    login_lock_minutes: int = 15
+    # Sign-in attempts per client address per minute (per replica).
+    login_requests_per_minute: int = 10
+    # Send the session cookie only over HTTPS. Always on in production; off by default
+    # elsewhere so plain-HTTP local setups work.
+    session_cookie_secure: bool = False
+
+    # User IDs (token `sub`, username, or X-User-Id in dev mode) allowed to read /v1/admin/*.
     admin_users: list[str] = []
 
     # Prometheus metrics on a separate internal port (never through the public API). 0 = off.
@@ -93,6 +108,10 @@ class Settings(BaseSettings):
         if self.auth_mode == "oidc" and not (self.oidc_issuer and self.oidc_audience):
             raise ValueError("AIP_AUTH_MODE=oidc needs AIP_OIDC_ISSUER and AIP_OIDC_AUDIENCE "
                              "(or set AIP_AUTH_MODE=dev for local development)")
+        if self.auth_mode == "password" and self.env == "production":
+            if not self.database_url:
+                raise ValueError("AIP_AUTH_MODE=password needs AIP_DATABASE_URL in production")
+            self.session_cookie_secure = True
         if self.langfuse_enabled and self.trace_hash_key is None:
             if self.env == "production":
                 raise ValueError("Langfuse tracing needs AIP_TRACE_HASH_KEY in production")

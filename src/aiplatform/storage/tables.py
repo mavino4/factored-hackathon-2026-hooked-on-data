@@ -83,3 +83,41 @@ handoffs = sa.Table(
     sa.Index("ix_handoffs_conversation", "conversation_id", "created_at"),
     sa.Index("ix_handoffs_status", "status", "created_at"),
 )
+
+# Username + password sign-in (accounts.py). `customer_id` points at bank.customers in the
+# core-banking database (a different database, so no foreign key); NULL for operators.
+users = sa.Table(
+    "users", metadata,
+    sa.Column("username", sa.Text, primary_key=True),
+    sa.Column("customer_id", sa.Text, nullable=True, unique=True),
+    sa.Column("password_hash", sa.Text, nullable=False),
+    sa.Column("failed_attempts", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("locked_until", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("disabled", sa.Boolean, nullable=False, server_default=sa.false()),
+    sa.Column("password_changed_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+)
+
+# `token_hash` is the SHA-256 of the session cookie: the token itself is never stored.
+sessions = sa.Table(
+    "sessions", metadata,
+    sa.Column("token_hash", sa.Text, primary_key=True),
+    sa.Column("username", sa.Text,
+              sa.ForeignKey("users.username", ondelete="CASCADE"), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Index("ix_sessions_username", "username"),
+)
+
+# Append-only audit trail of account events. No foreign key: it outlives the account.
+auth_events = sa.Table(
+    "auth_events", metadata,
+    sa.Column("id", sa.BigInteger().with_variant(sa.Integer, "sqlite"),
+              primary_key=True, autoincrement=True),
+    sa.Column("username", sa.Text, nullable=False),
+    sa.Column("event", sa.Text, nullable=False),
+    sa.Column("ip", sa.Text, nullable=True),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Index("ix_auth_events_username", "username", "created_at"),
+)

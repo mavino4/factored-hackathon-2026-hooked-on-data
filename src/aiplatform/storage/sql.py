@@ -9,16 +9,20 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from aiplatform.accounts import Account, Event, Session
 from aiplatform.agent.actions import ActionNotPending, PendingAction
 from aiplatform.agent.handoffs import Handoff, HandoffNotFound, Reason, Status
 from aiplatform.chat.inflight import ConversationBusy
 from aiplatform.chat.repository import Conversation, ConversationNotFound, Kind, title_from
 from aiplatform.storage.tables import (
+    auth_events,
     conversations,
     handoffs,
     messages,
     pending_actions,
+    sessions,
     usage_events,
+    users,
 )
 from aiplatform.usage import UsageEvent, utc_day_start
 
@@ -275,3 +279,92 @@ class SqlHandoffStore:
             row = (await db.execute(
                 sa.select(handoffs).where(handoffs.c.id == handoff_id))).one()
         return _row_to_handoff(row)
+
+
+class SqlAccountStore:
+    def __init__(self, engine: AsyncEngine):
+        self._engine = engine
+
+    async def get(self, username: str) -> Account | None:
+        async with self._engine.connect() as db:
+            row = (await db.execute(
+                sa.select(users).where(users.c.username == username))).first()
+        if row is None:
+            return None
+        return Account(username=row.username, password_hash=row.password_hash,
+                       customer_id=row.customer_id, failed_attempts=row.failed_attempts,
+                       locked_until=_as_utc(row.locked_until) if row.locked_until else None,
+                       disabled=row.disabled)
+
+    async def create(self, username: str, password_hash: str,
+                     customer_id: str | None = None) -> None:
+        now = datetime.now(UTC)
+        try:
+            async with self._engine.begin() as db:
+                await db.execute(users.insert().values(
+                    username=username, customer_id=customer_id, password_hash=password_hash,
+                    failed_attempts=0, disabled=False, password_changed_at=now,
+                    created_at=now))
+        except IntegrityError as exc:
+            raise ValueError(f"user exists: {username}") from exc
+
+    async def record_failure(self, username: str, *, max_failures: int,
+                             lock_until: datetime) -> bool:
+        # One UPDATE, so concurrent failures on several replicas are all counted.
+        failures = users.c.failed_attempts + 1
+        async with self._engine.begin() as db:
+            await db.execute(users.update().where(users.c.username == username).values(
+                failed_attempts=failures,
+                locked_until=sa.case((failures >= max_failures, lock_until),
+                                     else_=users.c.locked_until)))
+            count = await db.scalar(sa.select(users.c.failed_attempts)
+                                    .where(users.c.username == username))
+        return count is not None and count >= max_failures
+
+    async def reset_failures(self, username: str) -> None:
+        async with self._engine.begin() as db:
+            await db.execute(users.update().where(users.c.username == username)
+                             .values(failed_attempts=0, locked_until=None))
+
+    async def set_password(self, username: str, password_hash: str, now: datetime) -> None:
+        async with self._engine.begin() as db:
+            await db.execute(users.update().where(users.c.username == username)
+                             .values(password_hash=password_hash, password_changed_at=now))
+
+    async def add_session(self, session: Session) -> None:
+        async with self._engine.begin() as db:
+            await db.execute(sessions.insert().values(
+                token_hash=session.token_hash, username=session.username,
+                created_at=session.last_seen_at, last_seen_at=session.last_seen_at,
+                expires_at=session.expires_at))
+
+    async def get_session(self, token_hash: str) -> Session | None:
+        async with self._engine.connect() as db:
+            row = (await db.execute(
+                sa.select(sessions).where(sessions.c.token_hash == token_hash))).first()
+        if row is None:
+            return None
+        return Session(row.token_hash, row.username, _as_utc(row.last_seen_at),
+                       _as_utc(row.expires_at))
+
+    async def touch_session(self, token_hash: str, now: datetime) -> None:
+        async with self._engine.begin() as db:
+            await db.execute(sessions.update().where(sessions.c.token_hash == token_hash)
+                             .values(last_seen_at=now))
+
+    async def delete_session(self, token_hash: str) -> None:
+        async with self._engine.begin() as db:
+            await db.execute(sessions.delete().where(sessions.c.token_hash == token_hash))
+
+    async def delete_sessions(self, username: str, *, keep: str | None = None) -> None:
+        where = [sessions.c.username == username]
+        if keep is not None:
+            where.append(sessions.c.token_hash != keep)
+        async with self._engine.begin() as db:
+            await db.execute(sessions.delete().where(*where))
+
+    async def record_event(self, username: str, event: Event, ip: str | None,
+                           now: datetime) -> None:
+        async with self._engine.begin() as db:
+            await db.execute(auth_events.insert().values(
+                username=username, event=event, ip=ip, created_at=now))

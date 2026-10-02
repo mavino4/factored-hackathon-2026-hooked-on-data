@@ -127,10 +127,11 @@ Each chat or agent turn is sent as one trace to a **self-hosted Langfuse**: the 
 
 | What | Becomes |
 |---|---|
-| First name, city, card/account last 4 digits (tool fields, and the same values anywhere later in the run, e.g. in the model's reply) | `<NAME>`, `<CITY>`, `<LAST4>` |
+| First name, city, card/account last 4 digits (tool fields, and the same values anywhere later in the conversation, e.g. in the model's reply or in a later turn) | `<NAME>`, `<CITY>`, `<LAST4>` |
 | Balances, limits, available credit, money amounts in text | `<AMOUNT>` (turn off with `AIP_TRACE_MASK_AMOUNTS=false`, dev only) |
 | Cards (Luhn-checked), CPF, CNPJ, DNI, RUT, IBAN, CBU/CLABE and other 8+ digit runs, emails, phones | `<CARD>`, `<CPF>`, …, `<ID>`, `<EMAIL>`, `<PHONE>` |
-| User ID (OIDC `sub`) | `u_<keyed hash>`: stable per customer, not reversible without `AIP_TRACE_HASH_KEY` |
+| A PIN, CVV, one-time code or password the customer types, recognized by the word before it ("mi PIN es…", "senha: …") | `<SECRET>` |
+| User ID | The bank customer ID (`CLI-…`) when sign-in knows it (password mode): it names no one and can be matched to the bank's data. Otherwise (OIDC `sub`, operators) `u_<keyed hash>`: stable per user, not reversible without `AIP_TRACE_HASH_KEY`. The username is never sent |
 
 Product types, currencies, status, segment, interest rates and days past due stay visible for debugging. Masking is pattern-based: a name the customer types in free text, in a message where no tool returned it, is not caught. That's why the Langfuse UI is internal only.
 

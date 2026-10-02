@@ -23,6 +23,7 @@ from aiplatform.agent.events import (  # noqa: F401  (re-exported for callers)
     ToolResult,
 )
 from aiplatform.agent.graph import (  # noqa: F401  (re-exported for callers)
+    APPROVAL_MARK,
     MAX_TOOL_RESULT_CHARS,
     Decision,
     awaiting_approval_text,
@@ -64,32 +65,43 @@ class AgentRunner:
         self._config = {"recursion_limit": recursion_limit(max_iterations)}
 
     async def run(self, user_id: str, conversation_id: str, text: str,
-                  language: str | None = None) -> AsyncIterator[AgentEvent]:
+                  language: str | None = None,
+                  customer_id: str | None = None) -> AsyncIterator[AgentEvent]:
         conv = await self._repo.get(conversation_id, user_id)
         with self._inflight.hold(conv.id):
             check_history_size(conv.messages)
+            if text.lstrip().startswith(APPROVAL_MARK):
+                # Only the app writes approval notes: one typed by the customer is quoted,
+                # so the model can't take it for a real one.
+                text = f"The customer wrote: {text}"
             await self._repo.append(conv, {"role": "user", "content": text})
-            async for event in self._stream(user_id, conv, language, trace_input=text):
+            async for event in self._stream(user_id, conv, language, trace_input=text,
+                                            customer_id=customer_id):
                 yield event
 
     async def decide(self, user_id: str, conversation_id: str, action_id: str,
-                     approve: bool, language: str | None = None) -> AsyncIterator[AgentEvent]:
+                     approve: bool, language: str | None = None,
+                     customer_id: str | None = None) -> AsyncIterator[AgentEvent]:
         """Approve (run the tool) or reject a pending action, then let the agent continue."""
         conv = await self._repo.get(conversation_id, user_id)
         with self._inflight.hold(conv.id):
             async for event in self._stream(user_id, conv, language,
-                                            Decision(action_id, approve)):
+                                            Decision(action_id, approve),
+                                            customer_id=customer_id):
                 yield event
 
     async def _stream(self, user_id: str, conv: Conversation, language: str | None,
                       decision: Decision | None = None,
-                      trace_input: str | None = None) -> AsyncIterator[AgentEvent]:
+                      trace_input: str | None = None,
+                      customer_id: str | None = None) -> AsyncIterator[AgentEvent]:
         handoff = await self.handoffs.latest(conv.id)
         state = initial_state(user_id, conv, reply_language(language), decision,
                               language=language, handoff=handoff)
         config = {**self._config, **run_config(
-            "agent", user_id=user_id, conversation_id=conv.id, language=language,
+            "agent", user_id=user_id, conversation_id=conv.id, customer_id=customer_id,
+            language=language,
             trace_input=trace_input or (decision._asdict() if decision else None),
+            trace_sensitive=conv.messages,
             decision=decision._asdict() if decision else None)}
         async for event in stream_graph(self._graph, state, config, self._tracing):
             yield event
