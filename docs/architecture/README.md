@@ -9,9 +9,9 @@
 | **Growth target** | 1M+ concurrent users, spiky, global (§1 onward) |
 | **Stack** | Python 3.12, FastAPI, Anthropic Python SDK; light model (Claude Haiku 4.5) for first versions |
 
-**v1 as built:** [interactive diagram](bankbot-architecture.html) (open locally in a browser; each box links to its source lines at commit `fe076cc`): one agent that classifies each message first, human handoff, and self-hosted Langfuse tracing with PII masking. Spec: [`bankbot-architecture.json`](bankbot-architecture.json), generated with [Archify](https://github.com/tt-a1i/archify).
+**v1 as built:** [interactive diagram](bankbot-architecture.html) (open locally in a browser; each box lists its source lines at commit `5d18d49`): password sign-in over HTTPS, one agent that classifies each message first (and refuses manipulation attempts), human handoff, and self-hosted Langfuse tracing with PII masking. Spec: [`bankbot-architecture.json`](bankbot-architecture.json), generated with [Archify](https://github.com/tt-a1i/archify).
 
-![BankBot v1 architecture: unified agent, human handoff and masked tracing](bankbot-architecture.png)
+![BankBot v1 architecture: password sign-in, unified agent, human handoff and masked tracing](bankbot-architecture.png)
 
 ---
 
@@ -28,7 +28,7 @@ The real traffic is **6,000–10,000 per day**, not 1M concurrent. Even at 10× 
 | Agents | One LangGraph agent for every message: intent classification first (tools only for account questions), tool loop with iteration cap, validation, approval gate, and human handoff (customer request or insistence; operator API) | Durable workflows (Temporal) (ADR-0004); operator console |
 | Storage | **Postgres** (SQLAlchemy + Alembic): conversations, append-only messages keyed by `(conversation_id, seq)`, usage events. In-memory for local dev only | Distributed SQL |
 | Limits | Per-user rate limit (per replica) + daily token quota (shared via `usage_events` in Postgres) | Redis-backed, degradation ladder (ADR-0005) |
-| Auth | **OIDC access tokens** (JWT, verified against the issuer's JWKS; any standard provider, Auth0 recommended). Dev-only header mode, refused in production | Same, plus roles/scopes per tool |
+| Auth | **OIDC access tokens** (JWT, verified against the issuer's JWKS; any standard provider, Auth0 recommended), or **username + password** accounts (Argon2id hashes, HttpOnly session cookie, lockout, audit trail) for the LAN demo. Dev-only header mode, refused in production | Same, plus roles/scopes per tool |
 | Banking data | **External core-banking DB** (Datathon customers/products, no PII) read through the tools `get_customer_profile` / `get_products`. The read-only role `bank_reader` plus **Postgres Row-Level Security** keyed on the session's token `sub` (`app.subject`): the DB itself only shows the authenticated customer's rows | The bank's real core system / API with the same per-customer scoping |
 | UI | **Web chat UI** served by the API (plain JS, strict CSP): streaming chat, conversation list, agent tool calls, approval cards, OIDC login with PKCE | Separate frontend app/CDN if it grows |
 | Hosting | Any container platform (Cloud Run, ECS/Fargate, Azure Container Apps, or a small K8s) | Kubernetes + GitOps |

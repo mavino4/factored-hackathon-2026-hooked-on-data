@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="generator" content="archify 3.0.0">
   <meta name="archify-reader-contract" content="declared-wide-v1">
-  <title>BankBot (AI Platform v1) — Unified Agent, Human Handoff and Masked Tracing Diagram</title>
+  <title>BankBot (AI Platform v1) — Password Sign-in, Unified Agent and Masked Tracing Diagram</title>
   <script>
     // Resolve the theme before first paint so light-preference users don't
     // see a dark flash. The toolbar script below re-applies with UI state.
@@ -4978,17 +4978,17 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
            data-preset-badge-blueprint="BLUEPRINT / REV 01"
            data-preset-badge-editorial="EDITORIAL / FIELD NOTE">
         <div class="pulse-dot"></div>
-        <h1>BankBot (AI Platform v1) — Unified Agent, Human Handoff and Masked Tracing</h1>
+        <h1>BankBot (AI Platform v1) — Password Sign-in, Unified Agent and Masked Tracing</h1>
       </div>
     </div>
 
-    <script id="archify-source-evidence-data" type="application/json">{"schemaVersion":1,"verified":true,"repository":{"url":"git@github.com:mavino4/DatathonFactored","revision":"fe076cc04224bc65f8d02993c391a419f13afbde","shortRevision":"fe076cc","label":"mavino4/DatathonFactored","linkMode":"local-only"},"referenceCount":36,"nodes":{"customer":[{"path":"src/aiplatform/web/app.js","line":222,"endLine":250,"label":"SSE stream client"},{"path":"src/aiplatform/web/app.js","line":393,"endLine":445,"label":"advisor offer and polling"},{"path":"src/aiplatform/web/app.js","line":280,"endLine":316,"label":"safe Markdown as DOM"}],"oidc":[{"path":"src/aiplatform/auth.py","line":44,"endLine":105,"label":"JWT verified via JWKS"},{"path":"src/aiplatform/web/app.js","line":64,"endLine":84,"label":"PKCE login"}],"lb":[{"path":"deploy/nginx.conf","line":1,"endLine":15,"label":"upstream app, 300 s reads"},{"path":"docker-compose.yml","line":30,"endLine":55,"label":"2 app replicas + lb"}],"api":[{"path":"src/aiplatform/api/app.py","line":100,"endLine":140,"label":"wiring at startup"},{"path":"src/aiplatform/api/app.py","line":189,"endLine":215,"label":"user, rate limit, quota"},{"path":"src/aiplatform/api/app.py","line":312,"endLine":345,"label":"agent runs, offer answer"}],"appdb":[{"path":"src/aiplatform/storage/tables.py","line":10,"endLine":85,"label":"5 tables"},{"path":"src/aiplatform/storage/sql.py","line":49,"endLine":277,"label":"SQL stores"},{"path":"src/aiplatform/agent/loop.py","line":66,"endLine":97,"label":"turn stored, then run"}],"classify":[{"path":"src/aiplatform/agent/graph.py","line":189,"endLine":210,"label":"classify node"},{"path":"src/aiplatform/agent/intent.py","line":17,"endLine":111,"label":"tool, parse, repeats"},{"path":"src/aiplatform/agent/graph.py","line":351,"endLine":358,"label":"routing"}],"handoff":[{"path":"src/aiplatform/agent/graph.py","line":181,"endLine":225,"label":"wait and handoff nodes"},{"path":"src/aiplatform/agent/handoffs.py","line":1,"endLine":95,"label":"lifecycle and store"},{"path":"src/aiplatform/agent/loop.py","line":99,"endLine":125,"label":"accept, reply, close"}],"operator":[{"path":"src/aiplatform/api/app.py","line":344,"endLine":397,"label":"operator API"}],"agent":[{"path":"src/aiplatform/agent/graph.py","line":246,"endLine":320,"label":"model and tool steps"},{"path":"src/aiplatform/agent/graph.py","line":295,"endLine":301,"label":"irreversible → pending"},{"path":"src/aiplatform/agent/graph.py","line":321,"endLine":349,"label":"offer on insistence"}],"gateway":[{"path":"src/aiplatform/llm/gateway.py","line":99,"endLine":200,"label":"stream with failover"},{"path":"src/aiplatform/llm/gateway.py","line":214,"endLine":259,"label":"spans, usage and cost"}],"providers":[{"path":"src/aiplatform/llm/providers.py","line":15,"endLine":50,"label":"client per provider"},{"path":"src/aiplatform/llm/models.py","line":90,"endLine":94,"label":"classify and agent routes"}],"tools":[{"path":"src/aiplatform/banking/tools.py","line":65,"endLine":113,"label":"tool definitions"},{"path":"src/aiplatform/agent/graph.py","line":137,"endLine":145,"label":"traced tool call"}],"bankdb":[{"path":"src/aiplatform/banking/repository.py","line":79,"endLine":120,"label":"SET app.subject per tx"},{"path":"deploy/bankdb/schema.sql","line":58,"endLine":80,"label":"Row-Level Security"}],"masker":[{"path":"src/aiplatform/tracing.py","line":60,"endLine":145,"label":"run, step, model, tool spans"},{"path":"src/aiplatform/privacy.py","line":98,"endLine":165,"label":"mask and pseudonym"}],"langfuse":[{"path":"deploy/langfuse/docker-compose.yml","line":50,"endLine":151,"label":"local stack v4.47.0"},{"path":"deploy/langfuse/values.yaml","line":1,"endLine":50,"label":"Helm values"},{"path":"deploy/k8s/base/networkpolicy.yaml","line":42,"endLine":49,"label":"egress :3000"}]}}</script>
+    <script id="archify-source-evidence-data" type="application/json">{"schemaVersion":1,"verified":true,"repository":{"url":"git@github.com:mavino4/DatathonFactored","revision":"5d18d4901e4888d10e20b76e84828e7e0993c831","shortRevision":"5d18d49","label":"mavino4/DatathonFactored","linkMode":"local-only"},"referenceCount":41,"nodes":{"operator":[{"path":"src/aiplatform/api/app.py","line":428,"endLine":433,"label":"admin users only"},{"path":"src/aiplatform/api/app.py","line":458,"endLine":479,"label":"reply · close handoff"}],"customer":[{"path":"src/aiplatform/web/app.js","line":704,"endLine":711,"label":"password sign-in"},{"path":"src/aiplatform/web/app.js","line":231,"label":"POST + read SSE"},{"path":"src/aiplatform/api/app.py","line":481,"endLine":482,"label":"UI served by the API"}],"lb":[{"path":"deploy/nginx.lan.conf","line":5,"endLine":6,"label":"rate-limit zones"},{"path":"deploy/nginx.lan.conf","line":25,"endLine":44,"label":"TLS · admin allowlist"},{"path":"docker-compose.lan.yml","line":26,"endLine":31,"label":"443 + certificates"}],"api":[{"path":"src/aiplatform/api/app.py","line":216,"endLine":250,"label":"current_user · admit"},{"path":"src/aiplatform/api/app.py","line":394,"endLine":412,"label":"agent runs · decisions"},{"path":"docker-compose.yml","line":30,"endLine":48,"label":"app service"}],"agent":[{"path":"src/aiplatform/agent/loop.py","line":67,"endLine":107,"label":"run · decide · stream"},{"path":"src/aiplatform/agent/graph.py","line":213,"endLine":241,"label":"classify intent"},{"path":"src/aiplatform/agent/graph.py","line":400,"endLine":438,"label":"graph wiring"}],"gateway":[{"path":"src/aiplatform/llm/gateway.py","line":134,"endLine":204,"label":"stream with failover"},{"path":"src/aiplatform/llm/resilience.py","line":47,"label":"CircuitBreaker"},{"path":"src/aiplatform/llm/providers.py","line":15,"endLine":45,"label":"one client per provider"}],"claude":[{"path":"src/aiplatform/llm/models.py","line":90,"endLine":94,"label":"classify + agent routes"},{"path":"src/aiplatform/llm/providers.py","line":24,"endLine":30,"label":"AsyncAnthropic client"},{"path":"docker-compose.lan.yml","line":17,"label":"LAN demo provider"}],"langfuse":[{"path":"deploy/langfuse/docker-compose.yml","line":56,"endLine":57,"label":"langfuse-web"},{"path":"docker-compose.lan.yml","line":22,"endLine":24,"label":"internal Docker network"}],"tracing":[{"path":"src/aiplatform/tracing.py","line":61,"endLine":88,"label":"one trace per run"},{"path":"src/aiplatform/privacy.py","line":108,"endLine":124,"label":"Masker"},{"path":"src/aiplatform/graph_stream.py","line":38,"endLine":42,"label":"graph run is wrapped"}],"ollama":[{"path":"src/aiplatform/llm/providers.py","line":41,"endLine":44,"label":"Anthropic-compatible"},{"path":"docker-compose.yml","line":39,"endLine":41,"label":"compose default"}],"accounts":[{"path":"src/aiplatform/accounts.py","line":245,"endLine":275,"label":"login"},{"path":"src/aiplatform/accounts.py","line":277,"endLine":293,"label":"resolve session"},{"path":"src/aiplatform/api/app.py","line":283,"endLine":299,"label":"POST /v1/auth/login"}],"banktools":[{"path":"src/aiplatform/banking/tools.py","line":65,"endLine":113,"label":"profile · products"},{"path":"src/aiplatform/api/app.py","line":155,"endLine":163,"label":"wired at startup"}],"appdb":[{"path":"src/aiplatform/storage/tables.py","line":10,"endLine":123,"label":"tables"},{"path":"src/aiplatform/storage/sql.py","line":284,"endLine":370,"label":"SqlAccountStore"},{"path":"docker-compose.yml","line":5,"endLine":16,"label":"db service"}],"bankdb":[{"path":"src/aiplatform/banking/repository.py","line":87,"endLine":97,"label":"SET LOCAL app.subject"},{"path":"deploy/bankdb/schema.sql","line":60,"endLine":84,"label":"RLS policies · grants"},{"path":"docker-compose.yml","line":42,"endLine":43,"label":"bank_reader URL"}],"provision":[{"path":"scripts/users.py","line":113,"endLine":165,"label":"provision accounts"},{"path":"scripts/users.py","line":107,"endLine":110,"label":"link to customers"},{"path":"Makefile","line":32,"endLine":33,"label":"make users"}]}}</script>
     <script id="archify-i18n-data" type="application/json">{"locale":"en","messages":{"viewer.kind.frontend":"Frontend","viewer.kind.backend":"Backend","viewer.kind.database":"Database","viewer.kind.cloud":"Cloud","viewer.kind.security":"Security","viewer.kind.messagebus":"Message bus","viewer.kind.external":"External","viewer.kind.neutral":"Neutral","viewer.kind.node":"Node","viewer.kind.start":"Start","viewer.kind.active":"Active","viewer.kind.waiting":"Waiting","viewer.kind.decision":"Decision","viewer.kind.success":"Success","viewer.kind.failure":"Failure","viewer.toolbar.actions":"Diagram actions","viewer.theme.toggle.title":"Toggle theme (T)","viewer.theme.toggle":"Toggle color theme","viewer.theme.dark":"Dark","viewer.theme.light":"Light","viewer.preset.choose.title":"Choose visual style (S cycles)","viewer.preset.choose":"Choose visual style","viewer.preset.style":"Style","viewer.preset.menu":"Visual style","viewer.preset.identity":"Visual identity","viewer.preset.cycles":"to cycle","viewer.preset.classic":"Classic","viewer.preset.classic.short":"Classic","viewer.preset.classic.hint":"Stable technical default","viewer.preset.flow":"Signal Flow","viewer.preset.flow.short":"Flow","viewer.preset.flow.hint":"Motion-forward presentation","viewer.preset.blueprint":"Blueprint","viewer.preset.blueprint.hint":"Engineering review","viewer.preset.editorial":"Editorial","viewer.preset.editorial.hint":"Publication and launch notes","viewer.preset.badge.signalFlow":"SIGNAL FLOW","viewer.preset.badge.blueprint":"BLUEPRINT / REV 01","viewer.preset.badge.editorial":"EDITORIAL / FIELD NOTE","viewer.preset.badge.editorialPlate":"ARCHIFY / PLATE 04","viewer.preset.current":"Visual style: {style}. Choose visual style","viewer.motion.live":"Live","viewer.motion.still":"Still","viewer.motion.pause":"Pause motion","viewer.motion.resume":"Resume motion","viewer.motion.reduced":"Motion paused by reduced-motion preference","viewer.motion.hidden":"Motion paused while this page is hidden","viewer.motion.yielding":"Pause motion; currently yielding to {owner}","viewer.motion.yielding.title":"Live preview enabled · yielding to {owner}","viewer.owner.route":"Route Probe","viewer.owner.lens":"Semantic Lens","viewer.owner.relationship":"Relationship Preview","viewer.owner.intent":"Intent Trace","viewer.owner.focus":"semantic focus","viewer.owner.legend":"legend preview","viewer.owner.reader":"reader interaction","viewer.present.enter":"Enter presentation stage","viewer.present.enter.title":"Presentation stage (F)","viewer.present.exit":"Exit presentation stage","viewer.present.exit.title":"Exit presentation stage (F or Escape)","viewer.present.present":"Present","viewer.present.exit.label":"Exit","viewer.export.button":"Export","viewer.export.button.title":"Export diagram (E)","viewer.export.diagram":"Export diagram","viewer.export.menu":"Export","viewer.export.subtitle":"Portable, clean outputs","viewer.export.share":"Share","viewer.export.shareCard":"Share Card","viewer.export.routeShareCard":"Route Share Card","viewer.export.reachShareCard":"Reach Share Card","viewer.export.copyDiagram":"Copy diagram","viewer.export.clipboardPng":"PNG to clipboard","viewer.export.raster":"Raster images","viewer.export.image":"Image","viewer.export.lossless":"Lossless image","viewer.export.compact":"Compact image","viewer.export.modern":"Modern image","viewer.export.vectorMotion":"Vector and motion","viewer.export.vectorMotion.heading":"Vector \u0026 motion","viewer.export.editable":"Editable vector","viewer.export.svg.auto":"SVG · Auto","viewer.export.svg.auto.hint":"Matches host theme","viewer.export.svg.light":"SVG · Light","viewer.export.svg.light.hint":"Always light","viewer.export.svg.dark":"SVG · Dark","viewer.export.svg.dark.hint":"Always dark","viewer.export.motion6s":"6s motion","viewer.export.unsupported":"Not supported by this browser","viewer.export.clipboardUnsupported":"Clipboard image write not supported by this browser","viewer.export.clipboardUnsupported.short":"Clipboard image write not supported in this browser.","viewer.export.motionUnavailable":"Motion capture unavailable in this browser","viewer.export.webmUnavailable":"WebM unavailable in this browser","viewer.export.failed":"Export failed: {message}","viewer.export.unknownVariant":"Unknown Share Card variant: {variant}","viewer.export.routeRequired":"Trace a route before exporting a Route Share Card","viewer.export.reachRequired":"Trace authored reach before exporting a Reach Share Card","viewer.export.unknown":"unknown","viewer.export.routeFailed":"Route Share Card export failed: {message}","viewer.export.reachFailed":"Reach Share Card export failed: {message}","viewer.export.copyFailed":"Copy failed: {message}","viewer.export.copiedPng":"Copied PNG to clipboard","viewer.export.downloadedRoute":"Downloaded Route Share Card","viewer.export.downloadedReach":"Downloaded Reach Share Card","viewer.export.downloadedWebm":"Downloaded WebM","viewer.export.recording":"Recording 6 seconds of motion…","viewer.export.card.routeSummary.one":"Path: {source} → {target} · {count} step","viewer.export.card.routeSummary.other":"Path: {source} → {target} · {count} steps","viewer.export.card.reachSummary":"Authored {direction} from {origin} · {nodes} · {links} · max {hops}","viewer.export.card.node.one":"{count} node","viewer.export.card.node.other":"{count} nodes","viewer.export.card.link.one":"{count} link","viewer.export.card.link.other":"{count} links","viewer.export.card.hop.one":"{count} hop","viewer.export.card.hop.other":"{count} hops","viewer.export.card.routeBadge":"ARCHIFY · ROUTE · {hops}","viewer.export.card.reachBadge":"ARCHIFY · {direction} REACH","viewer.export.direction.upstream":"Upstream","viewer.export.direction.downstream":"Downstream","viewer.export.error.canvasUnavailable":"Canvas unavailable for {label}","viewer.export.error.contextUnavailable":"2D canvas context unavailable for {label}","viewer.export.error.toBlobUnavailable":"canvas.toBlob unavailable for {label}","viewer.export.error.toBlobNull":"canvas.toBlob returned no data for {label}","viewer.export.error.variantsCombined":"Share Card variants cannot be combined","viewer.export.error.viewerState":"Share Card export could not remove temporary viewer state","viewer.export.error.routeState":"Route Card export could not preserve the resolved route safely","viewer.export.error.reachState":"Reach Card export could not preserve authored reach safely","viewer.export.error.webmRequirements":"WebM motion export requires a trace animation and browser MediaRecorder support","viewer.export.error.mediaRecorder":"MediaRecorder failed","viewer.export.error.emptyWebm":"MediaRecorder produced an empty WebM","viewer.export.error.webmBackground":"SVG background could not be loaded for WebM export","viewer.guide.title":"Explore this system","viewer.focus.selectedNodes":"{count} selected nodes","viewer.guide.eyebrow":"Diagram guide","viewer.guide.close":"Close diagram guide","viewer.guide.inspecting":"Inspecting compiled semantics","viewer.guide.actions":"Diagram exploration actions","viewer.guide.find":"Find any node","viewer.guide.find.hint":"Search labels, responsibilities, kinds, and stable IDs.","viewer.guide.route":"Trace a route","viewer.guide.route.aria":"Trace a directed route","viewer.guide.route.hint":"Ask how two semantic nodes connect in authored direction.","viewer.guide.map":"See the whole system","viewer.guide.map.hint":"Open Semantic Radar with a live viewport and stable nodes.","viewer.guide.lens":"Compare semantic kinds","viewer.guide.lens.hint":"Count roles, reveal their traffic, and compare direct authored links.","viewer.guide.present":"Enter Presentation Stage","viewer.guide.present.hint":"Give the live diagram the viewport without changing export.","viewer.guide.shortcuts":"Additional keyboard shortcuts","viewer.guide.shortcut.export":"Export","viewer.guide.shortcut.theme":"Theme","viewer.guide.shortcut.style":"Style","viewer.guide.shortcut.reset":"Reset","viewer.guide.shortcut.zoomIn":"Zoom in","viewer.guide.shortcut.zoomOut":"Zoom out","viewer.guide.shortcut.close":"Close","viewer.guide.facts":"{nodes} · {relationships}","viewer.guide.fact.node.one":"{count} semantic node","viewer.guide.fact.node.other":"{count} semantic nodes","viewer.guide.fact.relationship.one":"{count} relationship","viewer.guide.fact.relationship.other":"{count} relationships","viewer.guide.open":"Open diagram guide","viewer.finder.title":"Find a node","viewer.finder.close":"Close node finder","viewer.finder.placeholder":"Search labels or IDs","viewer.finder.search":"Search diagram nodes","viewer.finder.results":"Diagram nodes","viewer.finder.empty":"No matching nodes","viewer.finder.result.focus":"Focus {label}","viewer.finder.result.routeStart":"Choose {label} as route start","viewer.finder.result.routeTarget":"Choose {label} as route destination, {links}","viewer.finder.status.empty":"No matching nodes","viewer.finder.status.count.one":"{count} matching node","viewer.finder.status.count.other":"{count} matching nodes","viewer.finder.noun.nodes":"nodes","viewer.finder.link.one":"{count} link","viewer.finder.link.other":"{count} links","viewer.finder.result.focus.one":"Focus {label}, {count} related connection","viewer.finder.result.focus.other":"Focus {label}, {count} related connections","viewer.finder.status.filtered":"{visible} of {available} {noun}","viewer.finder.status.all":"{available} {noun}","viewer.passport.eyebrow":"Semantic passport","viewer.passport.metadata":"Node metadata","viewer.passport.evidence":"Verified source evidence","viewer.passport.verified":"Verified source","viewer.passport.verificationScope":"Verified against local Git at the pinned revision. Remote access has not been checked.","viewer.passport.reach":"Authored reach","viewer.passport.reach.trace":"Trace authored reachability","viewer.passport.upstream":"Upstream","viewer.passport.downstream":"Downstream","viewer.passport.upstream.trace":"Trace upstream authored reachability","viewer.passport.downstream.trace":"Trace downstream authored reachability","viewer.passport.close":"Close semantic passport","viewer.passport.move":"Move semantic passport. Drag, use arrow keys, or press Home to reset.","viewer.passport.copy":"Copy link","viewer.passport.copy.focus":"Copy link to focused node","viewer.passport.relations":"Relations","viewer.passport.relations.show":"Show connected relationships","viewer.passport.relations.hide":"Hide connected relationships","viewer.passport.relations.list":"Connected relationships","viewer.passport.copyRelation":"Copy relation","viewer.passport.copyNode":"Copy node","viewer.passport.copyPinned":"Copy link to pinned relationship","viewer.passport.copySource":"Copy link to source node","viewer.passport.copy.focused.success":"Focused node link copied","viewer.passport.copy.pinned.success":"Pinned relationship link copied","viewer.passport.copy.focused.failed":"Could not copy focused node link","viewer.passport.copy.pinned.failed":"Could not copy pinned relationship link","viewer.passport.relationship.none":"No connected relationships","viewer.passport.relationship.count.one":"{count} relation","viewer.passport.relationship.count.other":"{count} relations","viewer.passport.relationship.show.one":"Show {count} connected relationship","viewer.passport.relationship.show.other":"Show {count} connected relationships","viewer.passport.relationship.summary":"{out} outgoing · {in} incoming{loops}","viewer.passport.relationship.loops":" · {count} loop","viewer.passport.relationship.explorer":"Direct relationship explorer","viewer.passport.relationship.help":"Use arrow keys to explore relationships. Press Enter or Space to pin details; Escape clears.","viewer.passport.relationship.loopsBack":"loops back","viewer.passport.relationship.connectsTo":"connects to","viewer.passport.relationship.connectsFrom":"connects from","viewer.passport.relationship.pinned":"Pinned relationship · {from} → {to} · {label}","viewer.passport.relationship.inspect":"Inspect relationship {index} of {total}: {from} to {to}, {label}. Press Enter for details.","viewer.passport.relationship.group.out":"Outgoing","viewer.passport.relationship.group.in":"Incoming","viewer.passport.relationship.group.loop":"Self loops","viewer.passport.relationship.row":"{group}: {relationship}, {neighbor}","viewer.passport.relationship.direction.out":"OUT →","viewer.passport.relationship.direction.in":"← IN","viewer.passport.relationship.direction.loop":"LOOP","viewer.passport.sourceCount.one":"{count} verified source reference","viewer.passport.sourceCount.other":"{count} verified source references","viewer.passport.sourceMarker":"SRC","viewer.passport.beacon.one":"{count} verified source; focus this node to inspect","viewer.passport.beacon.other":"{count} verified sources; focus this node to inspect","viewer.passport.repository.open":"Open verified repository revision {revision}","viewer.passport.source.open":"Open verified source {path} at revision {revision}","viewer.passport.source.openLink":"Open ↗","viewer.passport.reach.upstream.one":"Trace {count} upstream authored node","viewer.passport.reach.upstream.other":"Trace {count} upstream authored nodes","viewer.passport.reach.downstream.one":"Trace {count} downstream authored node","viewer.passport.reach.downstream.other":"Trace {count} downstream authored nodes","viewer.passport.reach.noUpstream":"No upstream authored nodes","viewer.passport.reach.noDownstream":"No downstream authored nodes","viewer.passport.reach.status":"{direction} · {nodes} nodes · {links} links · max {hops} hops","viewer.route.eyebrow":"Path","viewer.route.start":"Click where the path starts","viewer.route.start.find":"Find start","viewer.route.start.find.aria":"Find a route start","viewer.route.copy":"Copy link","viewer.route.copy.aria":"Copy link to traced route","viewer.route.clear":"Clear","viewer.route.clear.aria":"Clear route probe","viewer.route.traced":"Path","viewer.route.pickTwo":"Click two nodes on the diagram","viewer.route.pickOne":"Click a node on the diagram","viewer.route.controls":"Route journey controls","viewer.route.previous":"Previous route position","viewer.route.play":"Play route journey","viewer.route.pause":"Pause route journey","viewer.route.replay":"Replay route journey","viewer.route.next":"Next route position","viewer.route.journey":"Journey","viewer.route.pause.label":"Pause","viewer.route.replay.label":"Replay","viewer.route.overview":"Overview","viewer.route.overview.aria":"Show complete route overview","viewer.route.instructions":"Click a start, then an end. Paths follow the arrows.","viewer.route.destination":"Where does the path from {label} end?","viewer.route.destination.find":"Find target","viewer.route.destination.find.aria":"Find a reachable route destination","viewer.route.differentDestination":"Choose a different destination","viewer.route.distinct":"Pick two different nodes.","viewer.route.unreachable":"Cannot reach {label} from here","viewer.route.unreachable.detail":"{target} cannot be reached from {source} along the arrows. Pick a highlighted node.","viewer.route.start.instructions":"Next, pick the end. Only nodes you can reach will light up.","viewer.route.copy.success":"Traced route link copied","viewer.route.copy.failed":"Could not copy traced route link","viewer.route.position":"Route position {index} of {total}: {label}","viewer.route.step":"Step {index} of {total} · {phase} · {label}","viewer.route.motionRequired":"Automatic journey requires Live motion","viewer.route.trigger.clear":"Clear traced route","viewer.route.overview.status":"{nodes} · {hops} · shortest path","viewer.route.overview.node.one":"{count} node","viewer.route.overview.node.other":"{count} nodes","viewer.route.overview.hop.one":"{count} step","viewer.route.overview.hop.other":"{count} steps","viewer.route.phase.playing":"Playing","viewer.route.phase.complete":"Complete","viewer.route.phase.inspecting":"Inspecting","viewer.route.destination.count.one":"{count} reachable node is highlighted. Click it.","viewer.route.destination.count.other":"{count} reachable nodes are highlighted. Click one.","viewer.route.noOutgoing":"No arrows lead out of this node. Clear it and pick another start.","viewer.route.result.title":"{source} to {target}","viewer.route.finder.source.title":"Choose route start","viewer.route.finder.source.placeholder":"Search route sources","viewer.route.finder.source.empty":"No matching route sources","viewer.route.finder.source.results":"Nodes that can start a route","viewer.route.finder.source.noun":"route sources","viewer.route.finder.source.badge":"start","viewer.route.finder.target.title":"Destination from {label}","viewer.route.finder.target.placeholder":"Search reachable destinations","viewer.route.finder.target.empty":"No matching reachable destinations","viewer.route.finder.target.results":"Reachable route destinations","viewer.route.finder.target.noun":"reachable destinations","viewer.route.hop.one":"{count} hop","viewer.route.hop.other":"{count} hops","viewer.lens.eyebrow":"Semantic lens","viewer.lens.title":"Compare system roles","viewer.lens.close":"Close semantic lens","viewer.lens.instruction":"Choose up to two semantic kinds. One reveals its real traffic; two compare only direct authored relationships.","viewer.lens.kinds":"Semantic kinds","viewer.lens.choose":"Choose a kind to inspect its nodes and touching relationships.","viewer.lens.copy":"Copy link to semantic lens","viewer.lens.clear":"Clear semantic lens","viewer.lens.open":"Open semantic lens","viewer.lens.openActive":"Open active semantic lens","viewer.lens.legend":"Semantic legend","viewer.lens.legend.inspect.one":"Inspect {label}, {count} node","viewer.lens.legend.inspect.other":"Inspect {label}, {count} nodes","viewer.lens.kind.count.one":"{label}, {count} node","viewer.lens.kind.count.other":"{label}, {count} nodes","viewer.lens.compare.one":"{first} → {second}: {forward} · {second} → {first}: {reverse} · {count} direct relationship","viewer.lens.compare.other":"{first} → {second}: {forward} · {second} → {first}: {reverse} · {count} direct relationships","viewer.lens.single":"{nodes} · {relationships} · connected peers remain visible","viewer.lens.node.one":"{count} {label} node","viewer.lens.node.other":"{count} {label} nodes","viewer.lens.relationship.one":"{count} touching relationship","viewer.lens.relationship.other":"{count} touching relationships","viewer.radar.title":"Semantic radar","viewer.radar.building":"Building overview","viewer.radar.openFull":"Open full semantic radar","viewer.radar.open":"Open radar","viewer.radar.close":"Close semantic radar","viewer.radar.surface":"Diagram overview. Click a node to focus it, or use arrow keys to pan.","viewer.radar.click":"Click node","viewer.radar.drag":"Drag to pan","viewer.radar.space":"Semantic radar needs more MAP space.","viewer.radar.nodes":"Semantic diagram radar nodes","viewer.radar.focus":"Focus {label} from Semantic Radar","viewer.radar.status":"{count} nodes · {viewport}","viewer.radar.fullMap":"{count} nodes · full map","viewer.radar.compacted":"Radar compacted to avoid covering the Semantic Passport or MAP controls.","viewer.radar.cancelWaiting":"Cancel semantic radar waiting for more MAP space","viewer.radar.needsSpace":"Semantic radar needs more visible MAP space","viewer.radar.viewport.full":"full map","viewer.radar.viewport.width":"{percent}% width","viewer.radar.viewport.scale":"{percent}% viewport","viewer.nav.controls":"Diagram view controls","viewer.nav.route":"Trace a directed route","viewer.nav.route.title":"Trace route (R)","viewer.nav.route.short":"PATH","viewer.nav.radar":"Open semantic radar","viewer.nav.radar.title":"Semantic radar (M)","viewer.nav.radar.short":"MAP","viewer.nav.lens":"Open semantic lens","viewer.nav.lens.title":"Semantic lens (L)","viewer.nav.lens.short":"LENS","viewer.nav.find":"Find a node","viewer.nav.find.title":"Find a node (/)","viewer.outline.title":"Node index","viewer.rail.show":"Notes \u0026 index","viewer.rail.controls":"Side panel","viewer.rail.collapse":"Collapse side panel","viewer.rail.bottom":"Move panel below the diagram","viewer.rail.right":"Move panel beside the diagram","viewer.nav.guide":"Open diagram guide","viewer.nav.guide.title":"Diagram guide (?)","viewer.nav.zoomOut":"Zoom out","viewer.nav.zoomOut.title":"Zoom out (-)","viewer.nav.reset":"Reset diagram view","viewer.nav.reset.title":"Reset view (0)","viewer.nav.read":"READ","viewer.nav.zoomIn":"Zoom in","viewer.nav.zoomIn.title":"Zoom in (+)","viewer.nav.camera":"{hint}. Reset diagram view","viewer.nav.camera.title":"{semantic}{hint} · reset view (0)","viewer.nav.camera.semantic":"Semantic camera active · ","viewer.nav.level.map":"MAP","viewer.nav.level.read":"READ","viewer.nav.level.full":"FULL","viewer.nav.level.auto":"AUTO","viewer.nav.detail.map":"Zoom in to reveal relationship labels and node context","viewer.nav.detail.read":"Zoom in again to reveal tags and annotations","viewer.nav.detail.full":"Full diagram detail","viewer.intent.summary":"{label}. {out} outgoing, {in} incoming{loops}. {total} connections. Press Enter for details.","viewer.intent.loops":", {count} self loop","viewer.common.copied":"Copied","viewer.common.copyFailed":"Copy failed","viewer.common.copyLink":"Copy link","viewer.common.clear":"Clear","viewer.common.close":"Close"}}</script>
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / PLATE 04">
-      <svg viewBox="0 0 1592 972" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14">
-        <title id="archify-diagram-title">BankBot (AI Platform v1) — Unified Agent, Human Handoff and Masked Tracing</title>
+      <svg viewBox="0 0 1560 902" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14">
+        <title id="archify-diagram-title">BankBot (AI Platform v1) — Password Sign-in, Unified Agent and Masked Tracing</title>
         <desc id="archify-diagram-description">An architecture diagram generated by Archify.</desc>
         <!-- Definitions -->
         <defs>
@@ -5013,387 +5013,360 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Your infrastructure · Docker Compose locally, Kubernetes in production" x="238" y="124" width="1314" height="600" rx="12" class="c-region" stroke-width="1"/>
-
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="1" data-composition-frame-label="tracing UI · internal network only" x="1321.2361188322582" y="614" width="227.52776233548386" height="110" rx="8" class="c-security-group" stroke-width="1"/>
-
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="2" data-composition-frame-label="read-only bank_reader + RLS" x="1062.8051531903225" y="794" width="184.38969361935483" height="110" rx="8" class="c-security-group" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="db container · postgres:16" x="350" y="560" width="940" height="114" rx="12" class="c-region" stroke-width="1"/>
 
         <!-- Connection paths (before components for correct z-order) -->
         <g data-graph-role="automatic-crossover" style="--step:0">
-          <path data-graph-role="automatic-crossover-underlay" d="M 170 332 L 260 332" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="customer" data-edge-to="lb" data-edge-label="HTTPS · SSE" data-edge-key="0" data-edge-id="https" data-composition-points="170,332;260,332" data-composition-crossover="halo" data-composition-independent="true" d="M 170 332 L 260 332" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 180 262 L 300 262" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="customer" data-edge-to="lb" data-edge-label="HTTPS :443" data-edge-key="0" data-edge-id="customer-https" data-composition-points="180,262;300,262" data-composition-crossover="halo" data-composition-independent="true" d="M 180 262 L 300 262" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:1">
-          <path data-graph-role="automatic-crossover-underlay" d="M 95 300 L 95 174" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="customer" data-edge-to="oidc" data-edge-label="PKCE login" data-edge-key="1" data-edge-id="login" data-composition-points="95,300;95,174" data-composition-crossover="halo" data-composition-independent="true" d="M 95 300 L 95 174" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 180 82 L 362 82 Q 370 82 370 90 L 370 230" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="operator" data-edge-to="lb" data-edge-label="/v1/admin/ · this host" data-edge-key="1" data-edge-id="operator-admin" data-composition-points="180,82;370,82;370,230" data-composition-crossover="halo" data-composition-independent="true" d="M 180 82 L 362 82 Q 370 82 370 90 L 370 230" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:2">
-          <path data-graph-role="automatic-crossover-underlay" d="M 410 332 L 520 332" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="lb" data-edge-to="api" data-edge-label=":8000" data-edge-key="2" data-edge-id="proxy" data-composition-points="410,332;520,332" data-composition-crossover="halo" data-composition-independent="true" d="M 410 332 L 520 332" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 440 262 L 570 262" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="lb" data-edge-to="api" data-edge-label="proxy · SSE" data-edge-key="2" data-edge-id="lb-proxy" data-composition-points="440,262;570,262" data-composition-crossover="halo" data-composition-independent="true" d="M 440 262 L 570 262" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:3">
-          <path data-graph-role="automatic-crossover-underlay" d="M 595 272 L 595 256 Q 595 248 587 248 L 202 248 Q 194 248 194 240 L 194 150 Q 194 142 186 142 L 170 142" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="api" data-edge-to="oidc" data-edge-label="verify JWT" data-edge-key="3" data-edge-id="verify" data-composition-points="595,272;595,248;194,248;194,142;170,142" data-composition-crossover="halo" data-composition-independent="true" d="M 595 272 L 595 256 Q 595 248 587 248 L 202 248 Q 194 248 194 240 L 194 150 Q 194 142 186 142 L 170 142" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 638 294 L 638 310 Q 638 318 630 318 L 372 318 Q 364 318 364 326 L 364 427 Q 364 435 356 435 L 340 435" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="api" data-edge-to="accounts" data-edge-label="login · resolve cookie" data-edge-key="3" data-edge-id="api-accounts" data-composition-points="638,294;638,318;364,318;364,435;340,435" data-composition-crossover="halo" data-composition-independent="true" d="M 638 294 L 638 310 Q 638 318 630 318 L 372 318 Q 364 318 364 326 L 364 427 Q 364 435 356 435 L 340 435" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:4">
-          <path data-graph-role="automatic-crossover-underlay" d="M 670 332 L 780 332" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="api" data-edge-to="classify" data-edge-label="each message" data-edge-key="4" data-edge-id="every-message" data-composition-points="670,332;780,332" data-composition-crossover="halo" data-composition-independent="true" d="M 670 332 L 780 332" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 340 449 L 352 449 Q 360 449 360 457 L 360 614 Q 360 622 368 622 L 380 622" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="accounts" data-edge-to="appdb" data-edge-label="hashes · sessions · audit" data-edge-key="4" data-edge-id="accounts-store" data-composition-points="340,449;360,449;360,622;380,622" data-composition-crossover="halo" data-composition-independent="true" d="M 340 449 L 352 449 Q 360 449 360 457 L 360 614 Q 360 622 368 622 L 380 622" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:5">
-          <path data-graph-role="automatic-crossover-underlay" d="M 595 392 L 595 470" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="api" data-edge-to="appdb" data-edge-label="turns · quota" data-edge-key="5" data-edge-id="store" data-composition-points="595,392;595,470" data-composition-crossover="halo" data-composition-independent="true" d="M 595 392 L 595 470" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 652 294 L 652 310 Q 652 318 660 318 L 660 318 Q 668 318 668 326 L 668 558 Q 668 566 660 566 L 656 566 Q 648 566 648 574 L 648 590" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="api" data-edge-to="appdb" data-edge-label="conversations · quota" data-edge-key="5" data-edge-id="api-store" data-composition-points="652,294;652,318;668,318;668,566;648,566;648,590" data-composition-crossover="halo" data-composition-independent="true" d="M 652 294 L 652 310 Q 652 318 660 318 L 660 318 Q 668 318 668 326 L 668 558 Q 668 566 660 566 L 656 566 Q 648 566 648 574 L 648 590" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:6">
-          <path data-graph-role="automatic-crossover-underlay" d="M 860 300 L 860 284 Q 860 276 868 276 L 1028 276 Q 1036 276 1036 268 L 1036 190 Q 1036 182 1044 182 L 1060 182" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="classify" data-edge-to="gateway" data-edge-label="forced tool" data-edge-key="6" data-edge-id="classify-llm" data-composition-points="860,300;860,276;1036,276;1036,182;1060,182" data-composition-crossover="halo" data-composition-independent="true" d="M 860 300 L 860 284 Q 860 276 868 276 L 1028 276 Q 1036 276 1036 268 L 1036 190 Q 1036 182 1044 182 L 1060 182" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 720 262 L 840 262" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="api" data-edge-to="agent" data-edge-label="run · decide" data-edge-key="6" data-edge-id="api-agent" data-composition-points="720,262;840,262" data-composition-crossover="halo" data-composition-independent="true" d="M 720 262 L 840 262" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:7">
-          <path data-graph-role="automatic-crossover-underlay" d="M 940 323.95 L 1060 323.95" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="classify" data-edge-to="agent" data-edge-label="tools if account" data-edge-key="7" data-edge-id="route" data-composition-points="940,323.95;1060,323.95" data-composition-crossover="halo" data-composition-independent="true" d="M 940 323.95 L 1060 323.95" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 913 294 L 913 558 Q 913 566 905 566 L 670 566 Q 662 566 662 574 L 662 590" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="agent" data-edge-to="appdb" data-edge-label="messages · actions · handoffs" data-edge-key="7" data-edge-id="agent-store" data-composition-points="913,294;913,566;662,566;662,590" data-composition-crossover="halo" data-composition-independent="true" d="M 913 294 L 913 558 Q 913 566 905 566 L 670 566 Q 662 566 662 574 L 662 590" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:8">
-          <path data-graph-role="automatic-crossover-underlay" d="M 860 364 L 860 470" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="classify" data-edge-to="handoff" data-edge-label="human" data-edge-key="8" data-edge-id="ask-human" data-composition-points="860,364;860,470" data-composition-crossover="halo" data-composition-independent="true" d="M 860 364 L 860 470" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 927 294 L 927 310 Q 927 318 935 318 L 1078 318 Q 1086 318 1086 326 L 1086 434 Q 1086 442 1094 442 L 1110 442" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="agent" data-edge-to="banktools" data-edge-label="account intent only" data-edge-key="8" data-edge-id="agent-tools" data-composition-points="927,294;927,318;1086,318;1086,442;1110,442" data-composition-crossover="halo" data-composition-independent="true" d="M 927 294 L 927 310 Q 927 318 935 318 L 1078 318 Q 1086 318 1086 326 L 1086 434 Q 1086 442 1094 442 L 1110 442" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:9">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1060 339 L 1008 339 Q 1000 339 1000 347 L 1000 494 Q 1000 502 992 502 L 940 502" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="agent" data-edge-to="handoff" data-edge-label="offer on insistence" data-edge-key="9" data-edge-id="offer" data-composition-points="1060,339;1000,339;1000,502;940,502" data-composition-crossover="halo" data-composition-independent="true" d="M 1060 339 L 1008 339 Q 1000 339 1000 347 L 1000 494 Q 1000 502 992 502 L 940 502" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1185 474 L 1185 590" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="banktools" data-edge-to="bankdb" data-edge-label="read-only SELECT" data-edge-key="9" data-edge-id="tools-bankdb" data-composition-points="1185,474;1185,590" data-composition-crossover="halo" data-composition-independent="true" d="M 1185 474 L 1185 590" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:10">
-          <path data-graph-role="automatic-crossover-underlay" d="M 780 502 L 670 502" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="handoff" data-edge-to="appdb" data-edge-label="handoffs" data-edge-key="10" data-edge-id="queue" data-composition-points="780,502;670,502" data-composition-crossover="halo" data-composition-independent="true" d="M 780 502 L 670 502" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1000 262 L 1110 262" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="agent" data-edge-to="gateway" data-edge-label="stream()" data-edge-key="10" data-edge-id="agent-gateway" data-composition-points="1000,262;1110,262" data-composition-crossover="halo" data-composition-independent="true" d="M 1000 262 L 1110 262" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:11">
-          <path data-graph-role="automatic-crossover-underlay" d="M 860 820 L 860 534" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="operator" data-edge-to="handoff" data-edge-label="reply · close" data-edge-key="11" data-edge-id="operator-api" data-composition-points="860,820;860,534" data-composition-crossover="halo" data-composition-independent="true" d="M 860 820 L 860 534" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1260 262 L 1370 262" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="gateway" data-edge-to="claude" data-edge-label="Messages API" data-edge-key="11" data-edge-id="gateway-claude" data-composition-points="1260,262;1370,262" data-composition-crossover="halo" data-composition-independent="true" d="M 1260 262 L 1370 262" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:12">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1155 300 L 1155 214" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="agent" data-edge-to="gateway" data-edge-label="stream" data-edge-key="12" data-edge-id="agent-llm" data-composition-points="1155,300;1155,214" data-composition-crossover="halo" data-composition-independent="true" d="M 1155 300 L 1155 214" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1185 230 L 1185 114" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="gateway" data-edge-to="ollama" data-edge-label="AIP_PROVIDERS order" data-edge-key="12" data-edge-id="gateway-ollama" data-composition-points="1185,230;1185,114" data-composition-crossover="halo" data-composition-independent="true" d="M 1185 230 L 1185 114" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:13">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1155 150 L 1155 74" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="gateway" data-edge-to="providers" data-edge-label="Messages API" data-edge-key="13" data-edge-id="messages-api" data-composition-points="1155,150;1155,74" data-composition-crossover="halo" data-composition-independent="true" d="M 1155 150 L 1155 74" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 920 230 L 920 114" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="agent" data-edge-to="tracing" data-edge-label="run · step · tool spans" data-edge-key="13" data-edge-id="agent-tracing" data-composition-points="920,230;920,114" data-composition-crossover="halo" data-composition-independent="true" d="M 920 230 L 920 114" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:14">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1155 364 L 1155 470" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="agent" data-edge-to="tools" data-edge-label="read-only calls" data-edge-key="14" data-edge-id="call-tools" data-composition-points="1155,364;1155,470" data-composition-crossover="halo" data-composition-independent="true" d="M 1155 364 L 1155 470" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 840 82 L 720 82" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="tracing" data-edge-to="langfuse" data-edge-label="masked traces" data-edge-key="14" data-edge-id="tracing-langfuse" data-composition-points="840,82;720,82" data-composition-crossover="halo" data-composition-independent="true" d="M 840 82 L 720 82" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:15">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1155 534 L 1155 820" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="tools" data-edge-to="bankdb" data-edge-label="SQL as customer" data-edge-key="15" data-edge-id="rls-query" data-composition-points="1155,534;1155,820" data-composition-crossover="halo" data-composition-independent="true" d="M 1155 534 L 1155 820" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1185 770 L 1185 654" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="provision" data-edge-to="bankdb" data-edge-label="link customer_logins" data-edge-key="15" data-edge-id="provision-link" data-composition-points="1185,770;1185,654" data-composition-crossover="halo" data-composition-independent="true" d="M 1185 770 L 1185 654" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:16">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1250 332 L 1427 332 Q 1435 332 1435 340 L 1435 470" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="agent" data-edge-to="masker" data-edge-label="spans" data-edge-key="16" data-edge-id="spans" data-composition-points="1250,332;1435,332;1435,470" data-composition-crossover="halo" data-composition-independent="true" d="M 1250 332 L 1427 332 Q 1435 332 1435 340 L 1435 470" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:17">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1435 534 L 1435 640" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="masker" data-edge-to="langfuse" data-edge-label="OTLP · masked" data-edge-key="17" data-edge-id="otlp" data-composition-points="1435,534;1435,640" data-composition-crossover="halo" data-composition-independent="true" d="M 1435 534 L 1435 640" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1110 802 L 663 802 Q 655 802 655 794 L 655 654" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="provision" data-edge-to="appdb" data-edge-label="create users · auth_events" data-edge-key="16" data-edge-id="provision-users" data-composition-points="1110,802;655,802;655,654" data-composition-crossover="halo" data-composition-independent="true" d="M 1110 802 L 663 802 Q 655 802 655 794 L 655 654" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
 
         <!-- Components -->
-        <g id="node-customer" data-node-id="customer" data-node-label="Customer browser" tabindex="0" role="button" aria-label="Focus Customer browser, Web UI · one query button, Architecture component" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="Web UI · one query button" data-node-context="Architecture component">
-          <title>Customer browser · Web UI · one query button · Architecture component</title>
-          <rect x="20" y="300" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="20" y="300" width="150" height="64" rx="6" class="c-frontend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(26 306) scale(0.6875)">
+        <g id="node-operator" data-node-id="operator" data-node-label="Operator" tabindex="0" role="button" aria-label="Focus Operator, advisor · admin API, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="advisor · admin API" data-node-context="Architecture component">
+          <title>Operator · advisor · admin API · Architecture component</title>
+          <rect x="40" y="50" width="140" height="64" rx="6" class="c-mask"/>
+          <rect x="40" y="50" width="140" height="64" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(46 56) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="110" y="80" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Operator</text>
+        <text data-detail="context" x="110" y="96" class="t-muted" font-size="9" text-anchor="middle">advisor · admin API</text>
+        </g>
+
+        <g id="node-customer" data-node-id="customer" data-node-label="Customer browser" tabindex="0" role="button" aria-label="Focus Customer browser, web chat UI · plain JS, Architecture component" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="web chat UI · plain JS" data-node-context="Architecture component">
+          <title>Customer browser · web chat UI · plain JS · Architecture component</title>
+          <rect x="40" y="230" width="140" height="64" rx="6" class="c-mask"/>
+          <rect x="40" y="230" width="140" height="64" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(46 236) scale(0.6875)">
             <rect x="2" y="3" width="12" height="10" rx="2"/>
             <path d="M2 6.5h12"/>
             <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="95" y="330" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Customer browser</text>
-        <text data-detail="context" x="95" y="346" class="t-muted" font-size="9" text-anchor="middle">Web UI · one query button</text>
+          <text data-node-label="" data-detail-anchor="" x="110" y="260" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Customer browser</text>
+        <text data-detail="context" x="110" y="276" class="t-muted" font-size="9" text-anchor="middle">web chat UI · plain JS</text>
         </g>
 
-        <g id="node-oidc" data-node-id="oidc" data-node-label="OIDC Issuer" tabindex="0" role="button" aria-label="Focus OIDC Issuer, e.g. Auth0 · JWKS, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="e.g. Auth0 · JWKS" data-node-tag="dev: X-User-Id" data-node-context="Architecture component">
-          <title>OIDC Issuer · e.g. Auth0 · JWKS · Architecture component · dev: X-User-Id</title>
-          <rect x="20" y="110" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="20" y="110" width="150" height="64" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(26 116) scale(0.6875)">
-            <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
-            <path d="m5.8 8 1.5 1.5 3-3"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="95" y="140" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">OIDC Issuer</text>
-        <text data-detail="context" x="95" y="156" class="t-muted" font-size="9" text-anchor="middle">e.g. Auth0 · JWKS</text>
-        <text data-detail="fine" x="95" y="166" class="t-security" font-size="7" text-anchor="middle">dev: X-User-Id</text>
-        </g>
-
-        <g id="node-lb" data-node-id="lb" data-node-label="Load balancer" tabindex="0" role="button" aria-label="Focus Load balancer, nginx · Ingress (k8s), Your infrastructure · Docker Compose locally, Kubernetes in production" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="nginx · Ingress (k8s)" data-node-tag="buffering off" data-node-context="Your infrastructure · Docker Compose locally, Kubernetes in production">
-          <title>Load balancer · nginx · Ingress (k8s) · Your infrastructure · Docker Compose locally, Kubernetes in production · buffering off</title>
-          <rect x="260" y="300" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="260" y="300" width="150" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(266 306) scale(0.6875)">
+        <g id="node-lb" data-node-id="lb" data-node-label="nginx (lb)" tabindex="0" role="button" aria-label="Focus nginx (lb), TLS :443 · per-IP limits, Architecture component" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="TLS :443 · per-IP limits" data-node-tag="LAN demo" data-node-context="Architecture component">
+          <title>nginx (lb) · TLS :443 · per-IP limits · Architecture component · LAN demo</title>
+          <rect x="300" y="230" width="140" height="64" rx="6" class="c-mask"/>
+          <rect x="300" y="230" width="140" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(306 236) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="335" y="330" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Load balancer</text>
-        <text data-detail="context" x="335" y="346" class="t-muted" font-size="9" text-anchor="middle">nginx · Ingress (k8s)</text>
-        <text data-detail="fine" x="335" y="356" class="t-cloud" font-size="7" text-anchor="middle">buffering off</text>
+          <text data-node-label="" data-detail-anchor="" x="370" y="260" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">nginx (lb)</text>
+        <text data-detail="context" x="370" y="276" class="t-muted" font-size="9" text-anchor="middle">TLS :443 · per-IP limits</text>
+        <text data-detail="fine" x="370" y="286" class="t-cloud" font-size="7" text-anchor="middle">LAN demo</text>
         </g>
 
-        <g id="node-api" data-node-id="api" data-node-label="FastAPI API" tabindex="0" role="button" aria-label="Focus FastAPI API, auth · rate limit · quota, Your infrastructure · Docker Compose locally, Kubernetes in production" aria-pressed="false" data-node-kind="backend" data-node-sublabel="auth · rate limit · quota" data-node-tag="2 replicas" data-node-context="Your infrastructure · Docker Compose locally, Kubernetes in production">
-          <title>FastAPI API · auth · rate limit · quota · Your infrastructure · Docker Compose locally, Kubernetes in production · 2 replicas</title>
-          <rect x="520" y="272" width="150" height="120" rx="6" class="c-mask"/>
-          <rect x="520" y="272" width="150" height="120" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(526 278) scale(0.6875)">
+        <g id="node-api" data-node-id="api" data-node-label="FastAPI app" tabindex="0" role="button" aria-label="Focus FastAPI app, auth · admission · SSE, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="auth · admission · SSE" data-node-tag="2 replicas" data-node-context="Architecture component">
+          <title>FastAPI app · auth · admission · SSE · Architecture component · 2 replicas</title>
+          <rect x="570" y="230" width="150" height="64" rx="6" class="c-mask"/>
+          <rect x="570" y="230" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(576 236) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="595" y="330" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">FastAPI API</text>
-        <text data-detail="context" x="595" y="346" class="t-muted" font-size="9" text-anchor="middle">auth · rate limit · quota</text>
-        <text data-detail="fine" x="595" y="384" class="t-backend" font-size="7" text-anchor="middle">2 replicas</text>
+          <text data-node-label="" data-detail-anchor="" x="645" y="260" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">FastAPI app</text>
+        <text data-detail="context" x="645" y="276" class="t-muted" font-size="9" text-anchor="middle">auth · admission · SSE</text>
+        <text data-detail="fine" x="645" y="286" class="t-backend" font-size="7" text-anchor="middle">2 replicas</text>
         </g>
 
-        <g id="node-appdb" data-node-id="appdb" data-node-label="App Postgres" tabindex="0" role="button" aria-label="Focus App Postgres, messages · usage · handoffs, Your infrastructure · Docker Compose locally, Kubernetes in production" aria-pressed="false" data-node-kind="database" data-node-sublabel="messages · usage · handoffs" data-node-context="Your infrastructure · Docker Compose locally, Kubernetes in production">
-          <title>App Postgres · messages · usage · handoffs · Your infrastructure · Docker Compose locally, Kubernetes in production</title>
-          <rect x="520" y="470" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="520" y="470" width="150" height="64" rx="6" class="c-database" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(526 476) scale(0.6875)">
-            <ellipse cx="8" cy="4" rx="5" ry="2"/>
-            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="595" y="500" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">App Postgres</text>
-        <text data-detail="context" x="595" y="516" class="t-muted" font-size="8.7" text-anchor="middle">messages · usage · handoffs</text>
-        </g>
-
-        <g id="node-classify" data-node-id="classify" data-node-label="Intent classifier" tabindex="0" role="button" aria-label="Focus Intent classifier, classify step · forced tool, Your infrastructure · Docker Compose locally, Kubernetes in production" aria-pressed="false" data-node-kind="backend" data-node-sublabel="classify step · forced tool" data-node-tag="first step" data-node-context="Your infrastructure · Docker Compose locally, Kubernetes in production">
-          <title>Intent classifier · classify step · forced tool · Your infrastructure · Docker Compose locally, Kubernetes in production · first step</title>
-          <rect x="780" y="300" width="160" height="64" rx="6" class="c-mask"/>
-          <rect x="780" y="300" width="160" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(786 306) scale(0.6875)">
+        <g id="node-agent" data-node-id="agent" data-node-label="Agent runner" tabindex="0" role="button" aria-label="Focus Agent runner, LangGraph · classify first, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="LangGraph · classify first" data-node-context="Architecture component">
+          <title>Agent runner · LangGraph · classify first · Architecture component</title>
+          <rect x="840" y="230" width="160" height="64" rx="6" class="c-mask"/>
+          <rect x="840" y="230" width="160" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(846 236) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="860" y="330" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Intent classifier</text>
-        <text data-detail="context" x="860" y="346" class="t-muted" font-size="9" text-anchor="middle">classify step · forced tool</text>
-        <text data-detail="fine" x="860" y="356" class="t-backend" font-size="7" text-anchor="middle">first step</text>
+          <text data-node-label="" data-detail-anchor="" x="920" y="260" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Agent runner</text>
+        <text data-detail="context" x="920" y="276" class="t-muted" font-size="9" text-anchor="middle">LangGraph · classify first</text>
         </g>
 
-        <g id="node-handoff" data-node-id="handoff" data-node-label="Human handoff" tabindex="0" role="button" aria-label="Focus Human handoff, queue · bot paused, Your infrastructure · Docker Compose locally, Kubernetes in production" aria-pressed="false" data-node-kind="backend" data-node-sublabel="queue · bot paused" data-node-tag="human in the loop" data-node-context="Your infrastructure · Docker Compose locally, Kubernetes in production">
-          <title>Human handoff · queue · bot paused · Your infrastructure · Docker Compose locally, Kubernetes in production · human in the loop</title>
-          <rect x="780" y="470" width="160" height="64" rx="6" class="c-mask"/>
-          <rect x="780" y="470" width="160" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(786 476) scale(0.6875)">
+        <g id="node-gateway" data-node-id="gateway" data-node-label="AI Gateway" tabindex="0" role="button" aria-label="Focus AI Gateway, retry · breaker · failover, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="retry · breaker · failover" data-node-context="Architecture component">
+          <title>AI Gateway · retry · breaker · failover · Architecture component</title>
+          <rect x="1110" y="230" width="150" height="64" rx="6" class="c-mask"/>
+          <rect x="1110" y="230" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1116 236) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="860" y="500" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Human handoff</text>
-        <text data-detail="context" x="860" y="516" class="t-muted" font-size="9" text-anchor="middle">queue · bot paused</text>
-        <text data-detail="fine" x="860" y="526" class="t-backend" font-size="7" text-anchor="middle">human in the loop</text>
+          <text data-node-label="" data-detail-anchor="" x="1185" y="260" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">AI Gateway</text>
+        <text data-detail="context" x="1185" y="276" class="t-muted" font-size="9" text-anchor="middle">retry · breaker · failover</text>
         </g>
 
-        <g id="node-operator" data-node-id="operator" data-node-label="Advisor (operator)" tabindex="0" role="button" aria-label="Focus Advisor (operator), AIP_ADMIN_USERS, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="AIP_ADMIN_USERS" data-node-context="Architecture component">
-          <title>Advisor (operator) · AIP_ADMIN_USERS · Architecture component</title>
-          <rect x="780" y="820" width="160" height="64" rx="6" class="c-mask"/>
-          <rect x="780" y="820" width="160" height="64" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(786 826) scale(0.6875)">
+        <g id="node-claude" data-node-id="claude" data-node-label="Claude API" tabindex="0" role="button" aria-label="Focus Claude API, Haiku 4.5 on both routes, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="Haiku 4.5 on both routes" data-node-context="Architecture component">
+          <title>Claude API · Haiku 4.5 on both routes · Architecture component</title>
+          <rect x="1370" y="230" width="150" height="64" rx="6" class="c-mask"/>
+          <rect x="1370" y="230" width="150" height="64" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1376 236) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="860" y="850" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Advisor (operator)</text>
-        <text data-detail="context" x="860" y="866" class="t-muted" font-size="9" text-anchor="middle">AIP_ADMIN_USERS</text>
+          <text data-node-label="" data-detail-anchor="" x="1445" y="260" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Claude API</text>
+        <text data-detail="context" x="1445" y="276" class="t-muted" font-size="9" text-anchor="middle">Haiku 4.5 on both routes</text>
         </g>
 
-        <g id="node-agent" data-node-id="agent" data-node-label="Agent tool loop" tabindex="0" role="button" aria-label="Focus Agent tool loop, LangGraph · call_model ⇄ run_tools, Your infrastructure · Docker Compose locally, Kubernetes in production" aria-pressed="false" data-node-kind="backend" data-node-sublabel="LangGraph · call_model ⇄ run_tools" data-node-tag="approval gate" data-node-context="Your infrastructure · Docker Compose locally, Kubernetes in production">
-          <title>Agent tool loop · LangGraph · call_model ⇄ run_tools · Your infrastructure · Docker Compose locally, Kubernetes in production · approval gate</title>
-          <rect x="1060" y="300" width="190" height="64" rx="6" class="c-mask"/>
-          <rect x="1060" y="300" width="190" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1066 306) scale(0.6875)">
-            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="1155" y="330" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Agent tool loop</text>
-        <text data-detail="context" x="1155" y="346" class="t-muted" font-size="8.9" text-anchor="middle">LangGraph · call_model ⇄ run_tools</text>
-        <text data-detail="fine" x="1155" y="356" class="t-backend" font-size="7" text-anchor="middle">approval gate</text>
-        </g>
-
-        <g id="node-gateway" data-node-id="gateway" data-node-label="AI Gateway" tabindex="0" role="button" aria-label="Focus AI Gateway, retry · breaker · failover, Your infrastructure · Docker Compose locally, Kubernetes in production" aria-pressed="false" data-node-kind="backend" data-node-sublabel="retry · breaker · failover" data-node-tag="sticky provider" data-node-context="Your infrastructure · Docker Compose locally, Kubernetes in production">
-          <title>AI Gateway · retry · breaker · failover · Your infrastructure · Docker Compose locally, Kubernetes in production · sticky provider</title>
-          <rect x="1060" y="150" width="190" height="64" rx="6" class="c-mask"/>
-          <rect x="1060" y="150" width="190" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1066 156) scale(0.6875)">
-            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="1155" y="180" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">AI Gateway</text>
-        <text data-detail="context" x="1155" y="196" class="t-muted" font-size="9" text-anchor="middle">retry · breaker · failover</text>
-        <text data-detail="fine" x="1155" y="206" class="t-backend" font-size="7" text-anchor="middle">sticky provider</text>
-        </g>
-
-        <g id="node-providers" data-node-id="providers" data-node-label="LLM providers" tabindex="0" role="button" aria-label="Focus LLM providers, Claude · Bedrock · Vertex · Ollama, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="Claude · Bedrock · Vertex · Ollama" data-node-context="Architecture component">
-          <title>LLM providers · Claude · Bedrock · Vertex · Ollama · Architecture component</title>
-          <rect x="1055" y="10" width="200" height="64" rx="6" class="c-mask"/>
-          <rect x="1055" y="10" width="200" height="64" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1061 16) scale(0.6875)">
+        <g id="node-langfuse" data-node-id="langfuse" data-node-label="Langfuse" tabindex="0" role="button" aria-label="Focus Langfuse, self-hosted trace UI, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="self-hosted trace UI" data-node-context="Architecture component">
+          <title>Langfuse · self-hosted trace UI · Architecture component</title>
+          <rect x="570" y="50" width="150" height="64" rx="6" class="c-mask"/>
+          <rect x="570" y="50" width="150" height="64" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(576 56) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1155" y="40" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">LLM providers</text>
-        <text data-detail="context" x="1155" y="56" class="t-muted" font-size="9" text-anchor="middle">Claude · Bedrock · Vertex · Ollama</text>
+          <text data-node-label="" data-detail-anchor="" x="645" y="80" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Langfuse</text>
+        <text data-detail="context" x="645" y="96" class="t-muted" font-size="9" text-anchor="middle">self-hosted trace UI</text>
         </g>
 
-        <g id="node-tools" data-node-id="tools" data-node-label="Banking tools" tabindex="0" role="button" aria-label="Focus Banking tools, profile · products, Your infrastructure · Docker Compose locally, Kubernetes in production" aria-pressed="false" data-node-kind="backend" data-node-sublabel="profile · products" data-node-tag="read-only" data-node-context="Your infrastructure · Docker Compose locally, Kubernetes in production">
-          <title>Banking tools · profile · products · Your infrastructure · Docker Compose locally, Kubernetes in production · read-only</title>
-          <rect x="1080" y="470" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="1080" y="470" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1086 476) scale(0.6875)">
-            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="1155" y="500" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Banking tools</text>
-        <text data-detail="context" x="1155" y="516" class="t-muted" font-size="9" text-anchor="middle">profile · products</text>
-        <text data-detail="fine" x="1155" y="526" class="t-backend" font-size="7" text-anchor="middle">read-only</text>
-        </g>
-
-        <g id="node-bankdb" data-node-id="bankdb" data-node-label="Core-banking DB" tabindex="0" role="button" aria-label="Focus Core-banking DB, customers · products, read-only bank_reader + RLS" aria-pressed="false" data-node-kind="database" data-node-sublabel="customers · products" data-node-context="read-only bank_reader + RLS">
-          <title>Core-banking DB · customers · products · read-only bank_reader + RLS</title>
-          <rect x="1080" y="820" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="1080" y="820" width="150" height="64" rx="6" class="c-database" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(1086 826) scale(0.6875)">
-            <ellipse cx="8" cy="4" rx="5" ry="2"/>
-            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="1155" y="850" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Core-banking DB</text>
-        <text data-detail="context" x="1155" y="866" class="t-muted" font-size="9" text-anchor="middle">customers · products</text>
-        </g>
-
-        <g id="node-masker" data-node-id="masker" data-node-label="Trace masking" tabindex="0" role="button" aria-label="Focus Trace masking, span per step · privacy.Masker, Your infrastructure · Docker Compose locally, Kubernetes in production" aria-pressed="false" data-node-kind="security" data-node-sublabel="span per step · privacy.Masker" data-node-tag="PII → placeholders" data-node-context="Your infrastructure · Docker Compose locally, Kubernetes in production">
-          <title>Trace masking · span per step · privacy.Masker · Your infrastructure · Docker Compose locally, Kubernetes in production · PII → placeholders</title>
-          <rect x="1340" y="470" width="190" height="64" rx="6" class="c-mask"/>
-          <rect x="1340" y="470" width="190" height="64" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(1346 476) scale(0.6875)">
+        <g id="node-tracing" data-node-id="tracing" data-node-label="Tracing + Masker" tabindex="0" role="button" aria-label="Focus Tracing + Masker, mask before sending, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="mask before sending" data-node-context="Architecture component">
+          <title>Tracing + Masker · mask before sending · Architecture component</title>
+          <rect x="840" y="50" width="160" height="64" rx="6" class="c-mask"/>
+          <rect x="840" y="50" width="160" height="64" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(846 56) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1435" y="500" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Trace masking</text>
-        <text data-detail="context" x="1435" y="516" class="t-muted" font-size="9" text-anchor="middle">span per step · privacy.Masker</text>
-        <text data-detail="fine" x="1435" y="526" class="t-security" font-size="7" text-anchor="middle">PII → placeholders</text>
+          <text data-node-label="" data-detail-anchor="" x="920" y="80" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Tracing + Masker</text>
+        <text data-detail="context" x="920" y="96" class="t-muted" font-size="9" text-anchor="middle">mask before sending</text>
         </g>
 
-        <g id="node-langfuse" data-node-id="langfuse" data-node-label="Langfuse (self-hosted)" tabindex="0" role="button" aria-label="Focus Langfuse (self-hosted), web · worker · ClickHouse, Your infrastructure · Docker Compose locally, Kubernetes in production › tracing UI · internal network only" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="web · worker · ClickHouse" data-node-tag="internal only" data-node-context="Your infrastructure · Docker Compose locally, Kubernetes in production › tracing UI · internal network only">
-          <title>Langfuse (self-hosted) · web · worker · ClickHouse · Your infrastructure · Docker Compose locally, Kubernetes in production › tracing UI · internal network only · internal only</title>
-          <rect x="1350" y="640" width="170" height="64" rx="6" class="c-mask"/>
-          <rect x="1350" y="640" width="170" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(1356 646) scale(0.6875)">
-            <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
+        <g id="node-ollama" data-node-id="ollama" data-node-label="Ollama" tabindex="0" role="button" aria-label="Focus Ollama, local model · dev default, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="local model · dev default" data-node-context="Architecture component">
+          <title>Ollama · local model · dev default · Architecture component</title>
+          <rect x="1110" y="50" width="150" height="64" rx="6" class="c-mask"/>
+          <rect x="1110" y="50" width="150" height="64" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1116 56) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1435" y="670" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Langfuse (self-hosted)</text>
-        <text data-detail="context" x="1435" y="686" class="t-muted" font-size="9" text-anchor="middle">web · worker · ClickHouse</text>
-        <text data-detail="fine" x="1435" y="696" class="t-cloud" font-size="7" text-anchor="middle">internal only</text>
+          <text data-node-label="" data-detail-anchor="" x="1185" y="80" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Ollama</text>
+        <text data-detail="context" x="1185" y="96" class="t-muted" font-size="9" text-anchor="middle">local model · dev default</text>
+        </g>
+
+        <g id="node-accounts" data-node-id="accounts" data-node-label="Accounts" tabindex="0" role="button" aria-label="Focus Accounts, Argon2id · sessions, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="Argon2id · sessions" data-node-tag="password mode" data-node-context="Architecture component">
+          <title>Accounts · Argon2id · sessions · Architecture component · password mode</title>
+          <rect x="190" y="410" width="150" height="64" rx="6" class="c-mask"/>
+          <rect x="190" y="410" width="150" height="64" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(196 416) scale(0.6875)">
+            <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
+            <path d="m5.8 8 1.5 1.5 3-3"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="265" y="440" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Accounts</text>
+        <text data-detail="context" x="265" y="456" class="t-muted" font-size="9" text-anchor="middle">Argon2id · sessions</text>
+        <text data-detail="fine" x="265" y="466" class="t-security" font-size="7" text-anchor="middle">password mode</text>
+        </g>
+
+        <g id="node-banktools" data-node-id="banktools" data-node-label="Bank tools" tabindex="0" role="button" aria-label="Focus Bank tools, 2 read-only tools, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="2 read-only tools" data-node-context="Architecture component">
+          <title>Bank tools · 2 read-only tools · Architecture component</title>
+          <rect x="1110" y="410" width="150" height="64" rx="6" class="c-mask"/>
+          <rect x="1110" y="410" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1116 416) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1185" y="440" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Bank tools</text>
+        <text data-detail="context" x="1185" y="456" class="t-muted" font-size="9" text-anchor="middle">2 read-only tools</text>
+        </g>
+
+        <g id="node-appdb" data-node-id="appdb" data-node-label="App database (aiplatform)" tabindex="0" role="button" aria-label="Focus App database (aiplatform), conversations · messages · usage_events · pending_actions · handoffs · users · sessions · auth_events, db container · postgres:16" aria-pressed="false" data-node-kind="database" data-node-sublabel="conversations · messages · usage_events · pending_actions · handoffs · users · sessions · auth_events" data-node-context="db container · postgres:16">
+          <title>App database (aiplatform) · conversations · messages · usage_events · pending_actions · handoffs · users · sessions · auth_events · db container · postgres:16</title>
+          <rect x="380" y="590" width="550" height="64" rx="6" class="c-mask"/>
+          <rect x="380" y="590" width="550" height="64" rx="6" class="c-database" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(386 596) scale(0.6875)">
+            <ellipse cx="8" cy="4" rx="5" ry="2"/>
+            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="655" y="620" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">App database (aiplatform)</text>
+        <text data-detail="context" x="655" y="636" class="t-muted" font-size="8.9" text-anchor="middle">conversations · messages · usage_events · pending_actions · handoffs · users · sessions · auth_events</text>
+        </g>
+
+        <g id="node-bankdb" data-node-id="bankdb" data-node-label="Bank database" tabindex="0" role="button" aria-label="Focus Bank database, RLS by app.subject, db container · postgres:16" aria-pressed="false" data-node-kind="database" data-node-sublabel="RLS by app.subject" data-node-context="db container · postgres:16">
+          <title>Bank database · RLS by app.subject · db container · postgres:16</title>
+          <rect x="1110" y="590" width="150" height="64" rx="6" class="c-mask"/>
+          <rect x="1110" y="590" width="150" height="64" rx="6" class="c-database" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(1116 596) scale(0.6875)">
+            <ellipse cx="8" cy="4" rx="5" ry="2"/>
+            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1185" y="620" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Bank database</text>
+        <text data-detail="context" x="1185" y="636" class="t-muted" font-size="9" text-anchor="middle">RLS by app.subject</text>
+        </g>
+
+        <g id="node-provision" data-node-id="provision" data-node-label="scripts/users.py" tabindex="0" role="button" aria-label="Focus scripts/users.py, make users · operator CLI, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="make users · operator CLI" data-node-context="Architecture component">
+          <title>scripts/users.py · make users · operator CLI · Architecture component</title>
+          <rect x="1110" y="770" width="150" height="64" rx="6" class="c-mask"/>
+          <rect x="1110" y="770" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1116 776) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1185" y="800" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">scripts/users.py</text>
+        <text data-detail="context" x="1185" y="816" class="t-muted" font-size="9" text-anchor="middle">make users · operator CLI</text>
         </g>
 
         <!-- Connection labels -->
-        <g data-detail="context" data-edge-from="customer" data-edge-to="lb" data-edge-label="HTTPS · SSE" data-edge-key="0" data-edge-id="https">
-          <rect x="183.6" y="312" width="62.8" height="14" rx="3" class="c-mask"/>
-          <text x="215" y="322" class="t-edge-emphasis" font-size="8" text-anchor="middle">HTTPS · SSE</text>
+        <g data-detail="context" data-edge-from="customer" data-edge-to="lb" data-edge-label="HTTPS :443" data-edge-key="0" data-edge-id="customer-https">
+          <rect x="211" y="242" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="240" y="252" class="t-edge-emphasis" font-size="8" text-anchor="middle">HTTPS :443</text>
         </g>
-        <g data-detail="context" data-edge-from="customer" data-edge-to="oidc" data-edge-label="PKCE login" data-edge-key="1" data-edge-id="login">
-          <rect x="66" y="280" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="95" y="290" class="t-edge-security" font-size="8" text-anchor="middle">PKCE login</text>
+        <g data-detail="context" data-edge-from="operator" data-edge-to="lb" data-edge-label="/v1/admin/ · this host" data-edge-key="1" data-edge-id="operator-admin">
+          <rect x="312.2" y="136" width="115.6" height="14" rx="3" class="c-mask"/>
+          <text x="370" y="146" class="t-edge-security" font-size="8" text-anchor="middle">/v1/admin/ · this host</text>
         </g>
-        <g data-detail="context" data-edge-from="lb" data-edge-to="api" data-edge-label=":8000" data-edge-key="2" data-edge-id="proxy">
-          <rect x="448" y="312" width="34" height="14" rx="3" class="c-mask"/>
-          <text x="465" y="322" class="t-edge-emphasis" font-size="8" text-anchor="middle">:8000</text>
+        <g data-detail="context" data-edge-from="lb" data-edge-to="api" data-edge-label="proxy · SSE" data-edge-key="2" data-edge-id="lb-proxy">
+          <rect x="473.6" y="242" width="62.8" height="14" rx="3" class="c-mask"/>
+          <text x="505" y="252" class="t-edge-emphasis" font-size="8" text-anchor="middle">proxy · SSE</text>
         </g>
-        <g data-detail="context" data-edge-from="api" data-edge-to="oidc" data-edge-label="verify JWT" data-edge-key="3" data-edge-id="verify">
-          <rect x="365.5" y="228" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="394.5" y="238" class="t-edge-security" font-size="8" text-anchor="middle">verify JWT</text>
+        <g data-detail="context" data-edge-from="api" data-edge-to="accounts" data-edge-label="login · resolve cookie" data-edge-key="3" data-edge-id="api-accounts">
+          <rect x="443.2" y="298" width="115.6" height="14" rx="3" class="c-mask"/>
+          <text x="501" y="308" class="t-edge-security" font-size="8" text-anchor="middle">login · resolve cookie</text>
         </g>
-        <g data-detail="context" data-edge-from="api" data-edge-to="classify" data-edge-label="each message" data-edge-key="4" data-edge-id="every-message">
-          <rect x="691.2" y="312" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="725" y="322" class="t-edge-emphasis" font-size="8" text-anchor="middle">each message</text>
+        <g data-detail="context" data-edge-from="accounts" data-edge-to="appdb" data-edge-label="hashes · sessions · audit" data-edge-key="4" data-edge-id="accounts-store">
+          <rect x="295" y="515.5" width="130" height="14" rx="3" class="c-mask"/>
+          <text x="360" y="525.5" class="t-edge-security" font-size="8" text-anchor="middle">hashes · sessions · audit</text>
         </g>
-        <g data-detail="context" data-edge-from="api" data-edge-to="appdb" data-edge-label="turns · quota" data-edge-key="5" data-edge-id="store">
-          <rect x="516.5999999999999" y="424" width="72.4" height="14" rx="3" class="c-mask"/>
-          <text x="552.8" y="434" class="t-edge-default" font-size="8" text-anchor="middle">turns · quota</text>
+        <g data-detail="context" data-edge-from="api" data-edge-to="appdb" data-edge-label="conversations · quota" data-edge-key="5" data-edge-id="api-store">
+          <rect x="551.2" y="435" width="110.8" height="14" rx="3" class="c-mask"/>
+          <text x="606.6" y="445" class="t-edge-default" font-size="8" text-anchor="middle">conversations · quota</text>
         </g>
-        <g data-detail="context" data-edge-from="classify" data-edge-to="gateway" data-edge-label="forced tool" data-edge-key="6" data-edge-id="classify-llm">
-          <rect x="916.6" y="256" width="62.8" height="14" rx="3" class="c-mask"/>
-          <text x="948" y="266" class="t-edge-dashed" font-size="8" text-anchor="middle">forced tool</text>
+        <g data-detail="context" data-edge-from="api" data-edge-to="agent" data-edge-label="run · decide" data-edge-key="6" data-edge-id="api-agent">
+          <rect x="746.2" y="242" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="780" y="252" class="t-edge-emphasis" font-size="8" text-anchor="middle">run · decide</text>
         </g>
-        <g data-detail="context" data-edge-from="classify" data-edge-to="agent" data-edge-label="tools if account" data-edge-key="7" data-edge-id="route">
-          <rect x="956.6" y="303.95" width="86.8" height="14" rx="3" class="c-mask"/>
-          <text x="1000" y="313.95" class="t-edge-emphasis" font-size="8" text-anchor="middle">tools if account</text>
+        <g data-detail="context" data-edge-from="agent" data-edge-to="appdb" data-edge-label="messages · actions · handoffs" data-edge-key="7" data-edge-id="agent-store">
+          <rect x="712.9" y="546" width="149.2" height="14" rx="3" class="c-mask"/>
+          <text x="787.5" y="556" class="t-edge-default" font-size="8" text-anchor="middle">messages · actions · handoffs</text>
         </g>
-        <g data-detail="context" data-edge-from="classify" data-edge-to="handoff" data-edge-label="human" data-edge-key="8" data-edge-id="ask-human">
-          <rect x="820" y="410" width="34" height="14" rx="3" class="c-mask"/>
-          <text x="837" y="420" class="t-edge-security" font-size="8" text-anchor="middle">human</text>
+        <g data-detail="context" data-edge-from="agent" data-edge-to="banktools" data-edge-label="account intent only" data-edge-key="8" data-edge-id="agent-tools">
+          <rect x="955.9" y="298" width="101.2" height="14" rx="3" class="c-mask"/>
+          <text x="1006.5" y="308" class="t-edge-default" font-size="8" text-anchor="middle">account intent only</text>
         </g>
-        <g data-detail="context" data-edge-from="agent" data-edge-to="handoff" data-edge-label="offer on insistence" data-edge-key="9" data-edge-id="offer">
-          <rect x="949.4" y="400.5" width="101.2" height="14" rx="3" class="c-mask"/>
-          <text x="1000" y="410.5" class="t-edge-dashed" font-size="8" text-anchor="middle">offer on insistence</text>
+        <g data-detail="context" data-edge-from="banktools" data-edge-to="bankdb" data-edge-label="read-only SELECT" data-edge-key="9" data-edge-id="tools-bankdb">
+          <rect x="1092.1999999999998" y="525" width="86.8" height="14" rx="3" class="c-mask"/>
+          <text x="1135.6" y="535" class="t-edge-default" font-size="8" text-anchor="middle">read-only SELECT</text>
         </g>
-        <g data-detail="context" data-edge-from="handoff" data-edge-to="appdb" data-edge-label="handoffs" data-edge-key="10" data-edge-id="queue">
-          <rect x="700.8" y="482" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="725" y="492" class="t-edge-default" font-size="8" text-anchor="middle">handoffs</text>
+        <g data-detail="context" data-edge-from="agent" data-edge-to="gateway" data-edge-label="stream()" data-edge-key="10" data-edge-id="agent-gateway">
+          <rect x="1030.8" y="242" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="1055" y="252" class="t-edge-emphasis" font-size="8" text-anchor="middle">stream()</text>
         </g>
-        <g data-detail="context" data-edge-from="operator" data-edge-to="handoff" data-edge-label="reply · close" data-edge-key="11" data-edge-id="operator-api">
-          <rect x="823.8" y="800" width="72.4" height="14" rx="3" class="c-mask"/>
-          <text x="860" y="810" class="t-edge-security" font-size="8" text-anchor="middle">reply · close</text>
+        <g data-detail="context" data-edge-from="gateway" data-edge-to="claude" data-edge-label="Messages API" data-edge-key="11" data-edge-id="gateway-claude">
+          <rect x="1281.2" y="242" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="1315" y="252" class="t-edge-emphasis" font-size="8" text-anchor="middle">Messages API</text>
         </g>
-        <g data-detail="context" data-edge-from="agent" data-edge-to="gateway" data-edge-label="stream" data-edge-key="12" data-edge-id="agent-llm">
-          <rect x="1135.6" y="280" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="1155" y="290" class="t-edge-emphasis" font-size="8" text-anchor="middle">stream</text>
+        <g data-detail="context" data-edge-from="gateway" data-edge-to="ollama" data-edge-label="AIP_PROVIDERS order" data-edge-key="12" data-edge-id="gateway-ollama">
+          <rect x="1134.4" y="210" width="101.2" height="14" rx="3" class="c-mask"/>
+          <text x="1185" y="220" class="t-edge-dashed" font-size="8" text-anchor="middle">AIP_PROVIDERS order</text>
         </g>
-        <g data-detail="context" data-edge-from="gateway" data-edge-to="providers" data-edge-label="Messages API" data-edge-key="13" data-edge-id="messages-api">
-          <rect x="1121.2" y="130" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="1155" y="140" class="t-edge-emphasis" font-size="8" text-anchor="middle">Messages API</text>
+        <g data-detail="context" data-edge-from="agent" data-edge-to="tracing" data-edge-label="run · step · tool spans" data-edge-key="13" data-edge-id="agent-tracing">
+          <rect x="859.8" y="210" width="120.39999999999999" height="14" rx="3" class="c-mask"/>
+          <text x="920" y="220" class="t-edge-dashed" font-size="8" text-anchor="middle">run · step · tool spans</text>
         </g>
-        <g data-detail="context" data-edge-from="agent" data-edge-to="tools" data-edge-label="read-only calls" data-edge-key="14" data-edge-id="call-tools">
-          <rect x="1067" y="410" width="82" height="14" rx="3" class="c-mask"/>
-          <text x="1108" y="420" class="t-edge-default" font-size="8" text-anchor="middle">read-only calls</text>
+        <g data-detail="context" data-edge-from="tracing" data-edge-to="langfuse" data-edge-label="masked traces" data-edge-key="14" data-edge-id="tracing-langfuse">
+          <rect x="743.8" y="62" width="72.4" height="14" rx="3" class="c-mask"/>
+          <text x="780" y="72" class="t-edge-dashed" font-size="8" text-anchor="middle">masked traces</text>
         </g>
-        <g data-detail="context" data-edge-from="tools" data-edge-to="bankdb" data-edge-label="SQL as customer" data-edge-key="15" data-edge-id="rls-query">
-          <rect x="1067" y="670" width="82" height="14" rx="3" class="c-mask"/>
-          <text x="1108" y="680" class="t-edge-security" font-size="8" text-anchor="middle">SQL as customer</text>
+        <g data-detail="context" data-edge-from="provision" data-edge-to="bankdb" data-edge-label="link customer_logins" data-edge-key="15" data-edge-id="provision-link">
+          <rect x="1132" y="750" width="106" height="14" rx="3" class="c-mask"/>
+          <text x="1185" y="760" class="t-edge-dashed" font-size="8" text-anchor="middle">link customer_logins</text>
         </g>
-        <g data-detail="context" data-edge-from="agent" data-edge-to="masker" data-edge-label="spans" data-edge-key="16" data-edge-id="spans">
-          <rect x="1418" y="381" width="34" height="14" rx="3" class="c-mask"/>
-          <text x="1435" y="391" class="t-edge-dashed" font-size="8" text-anchor="middle">spans</text>
-        </g>
-        <g data-detail="context" data-edge-from="masker" data-edge-to="langfuse" data-edge-label="OTLP · masked" data-edge-key="17" data-edge-id="otlp">
-          <rect x="1356.6" y="580" width="72.4" height="14" rx="3" class="c-mask"/>
-          <text x="1392.8" y="590" class="t-edge-security" font-size="8" text-anchor="middle">OTLP · masked</text>
+        <g data-detail="context" data-edge-from="provision" data-edge-to="appdb" data-edge-label="create users · auth_events" data-edge-key="16" data-edge-id="provision-users">
+          <rect x="587.6" y="708" width="134.8" height="14" rx="3" class="c-mask"/>
+          <text x="655" y="718" class="t-edge-dashed" font-size="8" text-anchor="middle">create users · auth_events</text>
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="Your infrastructure · Docker Compose locally, Kubernetes in production">
-          <rect data-graph-role="structural-frame-label-mask" x="242" y="128" width="441.38068716129027" height="18" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="246" y="142.2709687419355" class="t-cloud" font-size="10.270968741935484" font-weight="600">Your infrastructure · Docker Compose locally, Kubernetes in production</text>
-        </g>
-
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="security-group" data-composition-frame-label="tracing UI · internal network only">
-          <rect data-graph-role="structural-frame-label-mask" x="1325.2361188322582" y="618" width="219.52776233548386" height="18" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="1329.2361188322582" y="632.2709687419355" class="t-security" font-size="10.270968741935484" font-weight="600">tracing UI · internal network only</text>
-        </g>
-
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="2" data-composition-frame-kind="security-group" data-composition-frame-label="read-only bank_reader + RLS">
-          <rect data-graph-role="structural-frame-label-mask" x="1066.8051531903225" y="798" width="176.38969361935483" height="18" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="1070.8051531903225" y="812.2709687419355" class="t-security" font-size="10.270968741935484" font-weight="600">read-only bank_reader + RLS</text>
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="db container · postgres:16">
+          <rect data-graph-role="structural-frame-label-mask" x="354" y="568" width="167.00646721290323" height="18" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="358" y="582.0645171290323" class="t-cloud" font-size="10.064517129032257" font-weight="600">db container · postgres:16</text>
         </g>
 
         <!-- Legend -->
         <g data-legend="" data-legend-bridge="">
-          <text x="40" y="936" class="t-primary" font-size="12" font-weight="650">Legend</text>
-          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="Frontend" data-legend-x="40" data-legend-baseline="956" data-legend-width="83">
-            <rect x="40" y="947" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
-            <text x="62" y="956" class="t-muted" font-size="10" font-weight="500">Frontend</text>
+          <text x="40" y="866" class="t-primary" font-size="12" font-weight="650">Legend</text>
+          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="Frontend" data-legend-x="40" data-legend-baseline="886" data-legend-width="83">
+            <rect x="40" y="877" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
+            <text x="62" y="886" class="t-muted" font-size="10" font-weight="500">Frontend</text>
           </g>
-          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="Backend" data-legend-x="145" data-legend-baseline="956" data-legend-width="78">
-            <rect x="145" y="947" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
-            <text x="167" y="956" class="t-muted" font-size="10" font-weight="500">Backend</text>
+          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="Backend" data-legend-x="145" data-legend-baseline="886" data-legend-width="78">
+            <rect x="145" y="877" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
+            <text x="167" y="886" class="t-muted" font-size="10" font-weight="500">Backend</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="Database" data-legend-x="245" data-legend-baseline="956" data-legend-width="83">
-            <rect x="245" y="947" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
-            <text x="267" y="956" class="t-muted" font-size="10" font-weight="500">Database</text>
+          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="Database" data-legend-x="245" data-legend-baseline="886" data-legend-width="83">
+            <rect x="245" y="877" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
+            <text x="267" y="886" class="t-muted" font-size="10" font-weight="500">Database</text>
           </g>
-          <g data-legend-semantic-kind="cloud" data-legend-kind="cloud" data-legend-label="Cloud" data-legend-x="350" data-legend-baseline="956" data-legend-width="68">
-            <rect x="350" y="947" width="16" height="10" rx="2.5" class="c-cloud" stroke-width="1"/>
-            <text x="372" y="956" class="t-muted" font-size="10" font-weight="500">Cloud</text>
+          <g data-legend-semantic-kind="cloud" data-legend-kind="cloud" data-legend-label="Cloud" data-legend-x="350" data-legend-baseline="886" data-legend-width="68">
+            <rect x="350" y="877" width="16" height="10" rx="2.5" class="c-cloud" stroke-width="1"/>
+            <text x="372" y="886" class="t-muted" font-size="10" font-weight="500">Cloud</text>
           </g>
-          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="Security" data-legend-x="440" data-legend-baseline="956" data-legend-width="83">
-            <rect x="440" y="947" width="16" height="10" rx="2.5" class="c-security" stroke-width="1"/>
-            <text x="462" y="956" class="t-muted" font-size="10" font-weight="500">Security</text>
+          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="Security" data-legend-x="440" data-legend-baseline="886" data-legend-width="83">
+            <rect x="440" y="877" width="16" height="10" rx="2.5" class="c-security" stroke-width="1"/>
+            <text x="462" y="886" class="t-muted" font-size="10" font-weight="500">Security</text>
           </g>
-          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="External" data-legend-x="545" data-legend-baseline="956" data-legend-width="83">
-            <rect x="545" y="947" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
-            <text x="567" y="956" class="t-muted" font-size="10" font-weight="500">External</text>
+          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="External" data-legend-x="545" data-legend-baseline="886" data-legend-width="83">
+            <rect x="545" y="877" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
+            <text x="567" y="886" class="t-muted" font-size="10" font-weight="500">External</text>
           </g>
         </g>
       </svg>
@@ -5574,37 +5547,83 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <div class="cards">
       <div class="card">
         <div class="card-header">
-          <div class="card-dot emerald"></div>
-          <h3>One agent, classified first</h3>
+          <div class="card-dot cyan"></div>
+          <h3>Request path</h3>
         </div>
         <ul>
-          <li>Every message is classified: account, general, out_of_scope or human</li>
-          <li>Only account questions get the tool definitions</li>
-          <li>If the classifier fails, the full agent with tools answers</li>
+          <li>The API serves the web UI and streams each agent run as Server-Sent Events</li>
+          <li>Admission before a run: 20 requests/min per user (per replica) and a daily token quota read from usage_events</li>
+          <li>nginx adds 30 r/m per client IP on /v1/ and 6 r/m on sign-in; port 80 only redirects to HTTPS</li>
+          <li>/v1/admin/ (usage, handoffs) answers only requests from the host machine</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <div class="card-dot violet"></div>
-          <h3>Human in the loop</h3>
+          <div class="card-dot emerald"></div>
+          <h3>Agent graph</h3>
         </div>
         <ul>
-          <li>Asking for a person opens a handoff; the bot stops answering</li>
-          <li>Insistence offers an advisor (Yes / No); no new offer for 3 turns after No</li>
-          <li>Advisors reply and close through the operator API; replies carry author=operator</li>
+          <li>Every message is classified first with a forced tool call; if the classifier fails, the full agent answers</li>
+          <li>human → open handoff: the bot stays quiet until the operator closes it</li>
+          <li>attack → fixed reply, no agent, no tools</li>
+          <li>account → the first model call must use a bank tool; general and out-of-scope get no tools</li>
+          <li>Model and tools loop up to 8 iterations; irreversible tools become pending actions that wait for approval</li>
+          <li>Insistence without resolution offers a human advisor</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot rose"></div>
-          <h3>Privacy in traces</h3>
+          <h3>Sign-in and sessions</h3>
         </div>
         <ul>
-          <li>One span per graph step, with its model calls and tools nested under it</li>
-          <li>Name, city, last 4, amounts and document numbers become placeholders</li>
-          <li>User ID sent as a keyed hash; AIP_TRACE_HASH_KEY required in production</li>
+          <li>Passwords stored as Argon2id hashes; the browser holds an opaque token in an HttpOnly, SameSite=Strict cookie and the database only its SHA-256</li>
+          <li>5 failed sign-ins lock an account for 15 min; sessions end after 30 min idle or 8 h</li>
+          <li>One answer for every failure, so usernames cannot be probed</li>
+          <li>Other modes: OIDC bearer JWT verified against the issuer&#39;s JWKS; dev header mode is refused in production</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot violet"></div>
+          <h3>Bank data isolation</h3>
+        </div>
+        <ul>
+          <li>The app connects as bank_reader in read-only transactions with a 5 s statement timeout</li>
+          <li>Each query first sets app.subject to the signed-in user; Row-Level Security then shows only that customer&#39;s rows</li>
+          <li>The customer comes from the session: the model cannot pass a customer ID or account number</li>
+          <li>scripts/users.py names accounts after the email&#39;s first part and writes the only plain-text passwords to credentials/</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot amber"></div>
+          <h3>Tracing privacy</h3>
+        </div>
+        <ul>
+          <li>Off unless enabled; every payload passes the Masker before it leaves the process</li>
+          <li>Values returned by bank tools stay masked for the rest of the run and in later turns</li>
+          <li>Trace user is the bank customer ID, else a keyed hash; the username is never sent</li>
+          <li>The gateway adds one generation per model attempt with tokens and cost</li>
+          <li>A blocked manipulation attempt gets a prompt_injection score</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot slate"></div>
+          <h3>Model calls and operations</h3>
+        </div>
+        <ul>
+          <li>Providers are tried in AIP_PROVIDERS order; a conversation sticks to the provider that served it</li>
+          <li>Up to 3 attempts per provider with backoff, then failover; SDK retries are disabled</li>
+          <li>Bedrock and Vertex clients exist and are enabled by configuration</li>
+          <li>Without AIP_DATABASE_URL the stores are in-memory; password mode requires the database in production</li>
+          <li>Prometheus metrics on the internal port 9090; Alembic migrations run as the migrate service</li>
         </ul>
       </div>
     </div>
