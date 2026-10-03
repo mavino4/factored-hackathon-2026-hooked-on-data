@@ -84,6 +84,8 @@ class Reply(BaseModel):
 
 class UserMessage(Reply):
     text: str = Field(min_length=1, max_length=20_000)
+    # The quick action (button) that sent this text, e.g. "qa_card_balance" (agent/quick.py).
+    quick_action: str | None = Field(default=None, max_length=40)
 
 
 class Decision(Reply):
@@ -162,7 +164,8 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             if bank is None:
                 log.warning("AIP_BANK_DATABASE_URL not set: the agent has no banking tools")
         app.state.agent = AgentRunner(gw, repo, usage, inflight, actions, agent_tools,
-                                      handoffs=handoffs, tracing=tracing)
+                                      handoffs=handoffs, tracing=tracing,
+                                      quick_mode=settings.quick_actions)
         yield
         tracing.flush()
         if bank is not None and bank_repo is None:
@@ -397,7 +400,7 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         conv = await get_conversation(request, conversation_id, user_id, "agent")
         return _stream(request.app.state.agent.run(
             user_id, conv.id, body.text, body.language,
-            customer_id=request.state.principal.customer_id))
+            customer_id=request.state.principal.customer_id, quick_action=body.quick_action))
 
     @app.post("/v1/conversations/{conversation_id}/actions/{action_id}")
     async def decide_action(conversation_id: str, action_id: str, body: Decision,

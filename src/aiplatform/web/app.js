@@ -559,7 +559,7 @@ function showWelcome() {
   const name = state.me && state.me.first_name;
   addBubble("assistant greeting", name ? t("greeting", { name }) : t("greeting_anon"));
   const buttons = QUICK_ACTIONS.map((key) =>
-    el("button", { class: "quick", type: "button", onclick: guard(() => sendText(t(key))) }, t(key)));
+    el("button", { class: "quick", type: "button", onclick: guard(() => sendText(t(key), key)) }, t(key)));
   messagesEl().append(el("div", { class: "quick-actions", role: "group",
     "aria-label": t("quick_title") }, ...buttons));
   renderConversationList();
@@ -654,7 +654,8 @@ async function send(event) {
   await sendText(text);
 }
 
-async function sendText(text) {
+// quickAction: the key of the quick-action button that sent the text, if any.
+async function sendText(text, quickAction) {
   if (!text || state.busy || (!state.current && !state.draft)) return;
   if (state.draft) {  // first message of a new query: create it now
     setBusy(true);
@@ -672,7 +673,8 @@ async function sendText(text) {
   messagesEl().querySelector(".empty")?.remove();
   messagesEl().querySelector(".quick-actions")?.remove();
   addBubble("user", text);
-  await runStream(`/v1/conversations/${state.current.id}/agent-runs`, { text });
+  await runStream(`/v1/conversations/${state.current.id}/agent-runs`,
+    quickAction ? { text, quick_action: quickAction } : { text });
 }
 
 function autoResize() {

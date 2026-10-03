@@ -2,7 +2,8 @@
 tools), or hand the conversation to a human.
 
     START ─┬─ open handoff ──> wait_for_human ──> END      (a human answers, not the bot)
-           ├─ decision ──────> apply_decision ──┐
+           ├─ quick action ──> quick_intent ────┐   (AIP_QUICK_ACTIONS=intent: no classifier)
+           ├─ decision ──────> apply_decision ──┤
            └─ new message ───> classify ─┬─ human ──> handoff ──> END
                                          ├─ attack ─> refuse_attack ──> END   (fixed reply)
                                          └─ account / general / out_of_scope
@@ -44,6 +45,7 @@ from aiplatform.agent.events import (
     ToolResult,
 )
 from aiplatform.agent.handoffs import Handoff, HandoffStore
+from aiplatform.agent.quick import QuickAction
 from aiplatform.agent.tools import Tool, ToolContext
 from aiplatform.chat.history import assistant_turn, check_history_size
 from aiplatform.chat.prompts import AGENT_SYSTEM_PROMPT, CLASSIFY_SYSTEM_PROMPT
@@ -139,6 +141,7 @@ class AgentState(TypedDict):
     decision: Decision | None  # set when the run resumes after an approval decision
     handoff: Handoff | None  # the conversation's latest handoff when the run started
     intent: intents.Intent | None  # set by classify
+    quick: QuickAction | None  # a trusted quick action that skips the classifier
     use_tools: bool  # send the tool definitions to the model
     iterations: int  # model calls so far
     tool_calls: list[str]
@@ -150,9 +153,10 @@ class AgentState(TypedDict):
 
 def initial_state(user_id: str, conv: Conversation, suffix: str | None,
                   decision: Decision | None = None, *, language: str | None = None,
-                  handoff: Handoff | None = None) -> AgentState:
+                  handoff: Handoff | None = None,
+                  quick: QuickAction | None = None) -> AgentState:
     return AgentState(user_id=user_id, conv=conv, suffix=suffix, language=language,
-                      decision=decision, handoff=handoff, intent=None,
+                      decision=decision, handoff=handoff, intent=None, quick=quick,
                       # An approval resumes a tool loop, which needs its tools.
                       use_tools=decision is not None,
                       iterations=0, tool_calls=[], pending=False, tool_uses=[],
@@ -248,6 +252,17 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
             intent = replace(intent, insistence=True)
         use_tools = intent.name == "account" or intent.needs_tools
         return {"intent": intent, "use_tools": use_tools}
+
+    @traced_node("quick_intent", lambda s: {"quick_action": s["quick"].key})
+    async def quick_intent(state: AgentState) -> dict:
+        """A quick action: an account question by construction, so no classifier call."""
+        conv = state["conv"]
+        intent = intents.Intent("account", needs_tools=True,
+                                insistence=intents.repeated(conv.messages),
+                                reason=f"quick action {state['quick'].key}")
+        metrics.AGENT_INTENTS.labels(intent.name).inc()
+        record_intent(intent.name)
+        return {"intent": intent, "use_tools": True}
 
     @traced_node("refuse_attack", lambda s: {"reason": s["intent"].reason})
     async def refuse_attack(state: AgentState) -> dict:
@@ -412,7 +427,9 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
     def start(state: AgentState) -> str:
         if state["handoff"] is not None and state["handoff"].status == "open":
             return "wait_for_human"
-        return "apply_decision" if state["decision"] else "classify"
+        if state["decision"]:
+            return "apply_decision"
+        return "quick_intent" if state["quick"] else "classify"
 
     def after_classify(state: AgentState) -> str:
         return {"human": "handoff", "attack": "refuse_attack"}.get(
@@ -431,14 +448,17 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
     graph = StateGraph(AgentState)
     graph.add_node("wait_for_human", wait_for_human)
     graph.add_node("classify", classify)
+    graph.add_node("quick_intent", quick_intent)
     graph.add_node("handoff", handoff)
     graph.add_node("refuse_attack", refuse_attack)
     graph.add_node("apply_decision", apply_decision)
     graph.add_node("call_model", call_model)
     graph.add_node("run_tools", run_tools)
     graph.add_node("finish", finish)
-    graph.add_conditional_edges(START, start, ["wait_for_human", "apply_decision", "classify"])
+    graph.add_conditional_edges(START, start, ["wait_for_human", "apply_decision",
+                                               "quick_intent", "classify"])
     graph.add_edge("wait_for_human", END)
+    graph.add_edge("quick_intent", "call_model")
     graph.add_conditional_edges("classify", after_classify,
                                 ["handoff", "refuse_attack", "call_model"])
     graph.add_edge("handoff", END)

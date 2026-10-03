@@ -97,6 +97,22 @@ def test_summary():
     assert s["behaviour"]["error_rate"] == round(1 / 3, 4)
 
 
+def test_turns_are_grouped_by_routing():
+    quick_root = root("t5", 1.5)
+    quick_root["metadata"].update(routing="intent", quick_action="qa_card_balance")
+    quick_turn = [quick_root,
+                  obs("t5", "quick_intent", n=1),
+                  obs("t5", "call_model", n=2),
+                  generation("t5", "agent.anthropic", 0.002, 2)]
+    turns = build_turns([*account_turn(), *quick_turn])
+    assert [(t.routing, t.quick_action, t.intent) for t in turns] == [
+        ("model", None, "account"), ("intent", "qa_card_balance", "account")]
+    routing = summarize(turns)["by_routing"]
+    assert routing["intent"]["turns"] == 1 and routing["intent"]["quick_actions"] == 1
+    assert routing["intent"]["model_calls_per_turn"] == 1.0
+    assert routing["model"]["model_calls_per_turn"] == 3.0
+
+
 def test_summary_of_nothing():
     assert summarize([])["turns"] == 0
 

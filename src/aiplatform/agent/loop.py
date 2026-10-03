@@ -9,6 +9,7 @@ actions of customers (accept or decline an offer) and operators (reply, close).
 import logging
 from collections.abc import AsyncIterator
 
+from aiplatform.agent import quick
 from aiplatform.agent.actions import ActionStore
 from aiplatform.agent.events import (  # noqa: F401  (re-exported for callers)
     AgentDone,
@@ -34,6 +35,7 @@ from aiplatform.agent.graph import (  # noqa: F401  (re-exported for callers)
     recursion_limit,
 )
 from aiplatform.agent.handoffs import Handoff, HandoffNotFound, HandoffStore, InMemoryHandoffStore
+from aiplatform.agent.quick import QuickAction, QuickMode
 from aiplatform.agent.tools import Tool
 from aiplatform.chat.history import check_history_size
 from aiplatform.chat.inflight import InFlight
@@ -51,7 +53,7 @@ class AgentRunner:
     def __init__(self, gateway: AIGateway, repo: ConversationRepository, usage: UsageStore,
                  inflight: InFlight, actions: ActionStore, tools: list[Tool], *,
                  handoffs: HandoffStore | None = None, max_iterations: int = 8,
-                 tracing: Tracing | None = None):
+                 tracing: Tracing | None = None, quick_mode: QuickMode = "model"):
         self._gateway = gateway
         self._repo = repo
         self._usage = usage
@@ -59,6 +61,7 @@ class AgentRunner:
         self._actions = actions
         self.handoffs = handoffs or InMemoryHandoffStore()
         self._tracing = tracing
+        self._quick_mode = quick_mode
         self._graph = build_agent_graph(
             gateway=gateway, repo=repo, usage=usage, actions=actions, handoffs=self.handoffs,
             tools={t.name: t for t in tools}, max_iterations=max_iterations)
@@ -66,7 +69,8 @@ class AgentRunner:
 
     async def run(self, user_id: str, conversation_id: str, text: str,
                   language: str | None = None,
-                  customer_id: str | None = None) -> AsyncIterator[AgentEvent]:
+                  customer_id: str | None = None,
+                  quick_action: str | None = None) -> AsyncIterator[AgentEvent]:
         conv = await self._repo.get(conversation_id, user_id)
         with self._inflight.hold(conv.id):
             check_history_size(conv.messages)
@@ -74,9 +78,11 @@ class AgentRunner:
                 # Only the app writes approval notes: one typed by the customer is quoted,
                 # so the model can't take it for a real one.
                 text = f"The customer wrote: {text}"
+            # A button is trusted only with its own text (see agent/quick.py).
+            action = quick.match(quick_action, text)
             await self._repo.append(conv, {"role": "user", "content": text})
             async for event in self._stream(user_id, conv, language, trace_input=text,
-                                            customer_id=customer_id):
+                                            customer_id=customer_id, quick_action=action):
                 yield event
 
     async def decide(self, user_id: str, conversation_id: str, action_id: str,
@@ -93,16 +99,22 @@ class AgentRunner:
     async def _stream(self, user_id: str, conv: Conversation, language: str | None,
                       decision: Decision | None = None,
                       trace_input: str | None = None,
-                      customer_id: str | None = None) -> AsyncIterator[AgentEvent]:
+                      customer_id: str | None = None,
+                      quick_action: QuickAction | None = None) -> AsyncIterator[AgentEvent]:
         handoff = await self.handoffs.latest(conv.id)
+        # How this turn is routed: by the button (the configured mode) or by the classifier.
+        routing = self._quick_mode if quick_action is not None else "model"
         state = initial_state(user_id, conv, reply_language(language), decision,
-                              language=language, handoff=handoff)
+                              language=language, handoff=handoff,
+                              quick=quick_action if routing != "model" else None)
         config = {**self._config, **run_config(
             "agent", user_id=user_id, conversation_id=conv.id, customer_id=customer_id,
             language=language,
             trace_input=trace_input or (decision._asdict() if decision else None),
             trace_sensitive=conv.messages,
-            decision=decision._asdict() if decision else None)}
+            decision=decision._asdict() if decision else None,
+            quick_action=quick_action.key if quick_action else None, routing=routing)}
+        config["tags"].append(f"routing:{routing}")
         async for event in stream_graph(self._graph, state, config, self._tracing):
             yield event
 

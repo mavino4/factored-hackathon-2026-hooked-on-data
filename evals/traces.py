@@ -1,7 +1,8 @@
 """Performance report from the traces already in Langfuse: how fast, how expensive and how
 the assistant behaved, per customer turn.
 
-    uv run python -m evals.traces [--since 7d] [--release SHA] [--check [SLO_JSON]]
+    uv run python -m evals.traces [--since 7d] [--release SHA] [--routing MODE] [--quick]
+                                  [--check [SLO_JSON]]
                                   [--compare RESULT_JSON] [--export-cases --outcome X]
 
 Reads only (see ``langfuse_api``). One trace is one customer turn: the ``agent`` run with
@@ -43,6 +44,10 @@ class Turn:
     user_id: str | None = None
     release: str | None = None
     language: str | None = None
+    # How the turn was routed (AIP_QUICK_ACTIONS): "model" (classifier) or the quick-action
+    # mode; and the quick action that sent it, if any. Older traces: "model", None.
+    routing: str = "model"
+    quick_action: str | None = None
     latency_s: float | None = None
     intent: str | None = None
     outcome: str | None = None
@@ -109,6 +114,8 @@ def build_turns(observations: list[dict], scores: list[dict] = ()) -> list[Turn]
         turn = Turn(trace_id=trace_id, start=root["startTime"], session_id=root.get("sessionId"),
                     user_id=root.get("userId"), release=release_of(root),
                     language=metadata.get("language"), latency_s=root.get("latency"),
+                    routing=metadata.get("routing") or "model",
+                    quick_action=metadata.get("quick_action") or None,
                     question=root.get("input") if isinstance(root.get("input"), str) else None,
                     answer=root.get("output") if isinstance(root.get("output"), str) else None,
                     scores=dict(trace_scores.get(trace_id, {})))
@@ -145,6 +152,8 @@ def build_turns(observations: list[dict], scores: list[dict] = ()) -> list[Turn]
                 output = obs.get("output")
                 if isinstance(output, dict) and output.get("final_text") and not turn.answer:
                     turn.answer = output["final_text"]
+            elif name == "quick_intent":
+                turn.intent = "account"
             elif name == "classify" and isinstance(obs.get("output"), dict):
                 turn.intent = (obs["output"].get("intent") or {}).get("name")
             elif name == "finish" and isinstance(obs.get("input"), dict):
@@ -194,7 +203,9 @@ def summarize(turns: list[Turn], meta: dict | None = None) -> dict:
             tool_s[name].extend(values)
     intents = Counter(t.intent or "none" for t in turns)
     intent_s: dict[str, list[float]] = defaultdict(list)
+    routing_turns: dict[str, list[Turn]] = defaultdict(list)
     for t in turns:
+        routing_turns[t.routing].append(t)
         if t.latency_s is not None:
             intent_s[t.intent or "none"].append(t.latency_s)
     outcomes = Counter(t.outcome for t in turns)
@@ -241,6 +252,14 @@ def summarize(turns: list[Turn], meta: dict | None = None) -> dict:
                    "p99_s": percentile(intent_s[name], 0.99),
                    "mean_cost_usd": mean([t.cost for t in turns if (t.intent or "none") == name])}
             for name, count in intents.most_common()},
+        "by_routing": {
+            name: {"turns": len(group), "share": rate(len(group), n),
+                   "quick_actions": sum(1 for t in group if t.quick_action),
+                   "latency": spread([t.latency_s for t in group if t.latency_s is not None]),
+                   "mean_cost_usd": mean([t.cost for t in group]),
+                   "model_calls_per_turn": mean(
+                       [len(t.model_s) + len(t.classify_s) for t in group], 2)}
+            for name, group in sorted(routing_turns.items())},
         "outcomes": {name: {"turns": count, "share": rate(count, n)}
                      for name, count in outcomes.most_common()},
         "behaviour": {
@@ -320,6 +339,12 @@ def print_report(s: dict) -> None:
     for name, v in s["by_intent"].items():
         print(f"{name:<16}{v['turns']:>7} {_fmt(v['share'], '%'):>7} {_fmt(v['p95_s'], 's'):>8} "
               f"{_fmt(v['p99_s'], 's'):>8} {_fmt(v['mean_cost_usd'], '$'):>10}")
+    print("\nRouting           turns   quick      p50      p95      p99  mean cost  calls")
+    for name, v in s["by_routing"].items():
+        lat = v["latency"]
+        print(f"{name:<16}{v['turns']:>7} {v['quick_actions']:>7} {_fmt(lat['p50_s'], 's'):>8} "
+              f"{_fmt(lat['p95_s'], 's'):>8} {_fmt(lat['p99_s'], 's'):>8} "
+              f"{_fmt(v['mean_cost_usd'], '$'):>10} {_fmt(v['model_calls_per_turn']):>6}")
     print("\nOutcome: " + " · ".join(f"{name} {_fmt(v['share'], '%')} ({v['turns']})"
                                       for name, v in s["outcomes"].items()))
     b = s["behaviour"]
@@ -366,14 +391,17 @@ def to_case(turn: Turn) -> dict:
 
 
 def load_turns(api: LangfuseAPI, since: datetime, until: datetime | None = None,
-               release: str | None = None) -> list[Turn]:
+               release: str | None = None, routing: str | None = None,
+               quick_only: bool = False) -> list[Turn]:
     observations = [o for o in api.observations(since, until)]
     # Inputs and outputs only where they are small and needed: steps and the run itself.
     detailed = {o["id"]: o for kind in ("SPAN", "AGENT")
                 for o in api.observations(since, until, type=kind, io=True)}
     observations = [detailed.get(o["id"], o) for o in observations]
     turns = build_turns(observations, list(api.scores(since)))
-    return [t for t in turns if release is None or t.release == release]
+    return [t for t in turns if (release is None or t.release == release)
+            and (routing is None or t.routing == routing)
+            and (not quick_only or t.quick_action)]
 
 
 def main() -> int:
@@ -381,6 +409,9 @@ def main() -> int:
     parser.add_argument("--since", default="7d", help="24h, 7d, 30m or an ISO date (UTC)")
     parser.add_argument("--until", help="ISO date (UTC); default: now")
     parser.add_argument("--release", help="only turns served by this release (git commit)")
+    parser.add_argument("--routing", help="only turns routed this way: model, intent...")
+    parser.add_argument("--quick", action="store_true",
+                        help="only turns sent by a quick-action button")
     parser.add_argument("--check", nargs="?", const=str(DEFAULT_SLO), metavar="SLO_JSON",
                         help="exit 1 if a threshold is broken (default: evals/trace_slo.json)")
     parser.add_argument("--compare", metavar="RESULT_JSON", help="show changes vs a saved report")
@@ -394,7 +425,8 @@ def main() -> int:
     api = LangfuseAPI.from_settings(get_settings())
     try:
         turns = load_turns(api, parse_since(args.since),
-                           parse_since(args.until) if args.until else None, args.release)
+                           parse_since(args.until) if args.until else None, args.release,
+                           args.routing, args.quick)
     finally:
         api.close()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -412,7 +444,8 @@ def main() -> int:
 
     summary = summarize(turns, {"timestamp": datetime.now(UTC).isoformat(),
                                 "since": args.since, "until": args.until,
-                                "release": args.release})
+                                "release": args.release, "routing": args.routing,
+                                "quick": args.quick})
     print_report(summary)
     out = out_dir / f"traces-{stamp}.json"
     out.write_text(json.dumps({**summary, "turn_rows": [
