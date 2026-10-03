@@ -4,8 +4,9 @@ bank tools) with Langfuse tracing on, once per classifier mode, to compare them 
     uv run python scripts/replay_intents.py --limit 80               # llm and jev_llm
     uv run python scripts/replay_intents.py --modes jev_llm --limit 20
 
-Each mode's traces carry the release ``<git sha>-replay-<mode>`` (environment from .env),
-so they can be reported apart and compared:
+Each mode runs in its own process (the Langfuse client is a per-process singleton) and its
+traces carry the release ``<git sha>-replay<tag>-<mode>`` (environment from .env), so they
+can be reported apart and compared:
 
     make trace-report ARGS="--since 2h --release <sha>-replay-llm"
     make trace-report ARGS="--since 2h --release <sha>-replay-jev_llm"
@@ -102,18 +103,26 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=80)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--user", default="eval-es", help="a user linked in the bank DB")
+    parser.add_argument("--tag", default="", help="suffix for the release, e.g. --tag=-r2")
     args = parser.parse_args()
 
+    if len(args.modes) > 1:
+        # One process per mode: the Langfuse client is a per-process singleton (its release
+        # is fixed when it starts, and flushing shuts it down), so modes must not share one.
+        for mode in args.modes:
+            command = [sys.executable, __file__, "--modes", mode, "--limit", str(args.limit),
+                       "--seed", str(args.seed), "--user", args.user, f"--tag={args.tag}"]
+            subprocess.run(command, check=True)
+        return 0
     sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
                          text=True, check=True).stdout.strip()
     cases = sample(args.limit, args.seed)
-    print(f"{len(cases)} cases: {dict(Counter(c['intent'] for c in cases))}")
-    for mode in args.modes:
-        release = f"{sha}-replay-{mode}"
-        start = time.perf_counter()
-        outcomes = asyncio.run(replay(mode, cases, release, args.user))
-        print(f"{mode}: {dict(outcomes)} in {time.perf_counter() - start:.0f} s "
-              f"(release {release})")
+    mode = args.modes[0]
+    print(f"{mode}: {len(cases)} cases {dict(Counter(c['intent'] for c in cases))}")
+    release = f"{sha}-replay{args.tag}-{mode}"
+    start = time.perf_counter()
+    outcomes = asyncio.run(replay(mode, cases, release, args.user))
+    print(f"{mode}: {dict(outcomes)} in {time.perf_counter() - start:.0f} s (release {release})")
     return 0
 
 
