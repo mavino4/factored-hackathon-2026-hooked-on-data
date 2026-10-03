@@ -6,6 +6,8 @@ Needs Ollama with ``bge-m3`` (``ollama pull bge-m3``) and scikit-learn (dependen
 ``classifiers``). Vectors are cached per text, so training and repeated runs embed each
 message once."""
 
+import time
+
 import httpx
 import numpy as np
 from sklearn.linear_model import LogisticRegression
@@ -23,14 +25,24 @@ class OllamaEmbedder:
         self._model, self._batch = model, batch
         self._cache: dict[str, np.ndarray] = {}
 
+    def clear(self) -> None:
+        self._cache.clear()
+
     def embed(self, texts: list[str]) -> np.ndarray:
         """Unit vectors, one row per text."""
         missing = list(dict.fromkeys(t for t in texts if t not in self._cache))
         for i in range(0, len(missing), self._batch):
             chunk = missing[i:i + self._batch]
-            response = self._client.post("/api/embed", json={
-                "model": self._model, "input": chunk, "keep_alive": "30m"})
-            response.raise_for_status()
+            for attempt in range(3):  # Ollama drops the connection while swapping models
+                try:
+                    response = self._client.post("/api/embed", json={
+                        "model": self._model, "input": chunk, "keep_alive": "30m"})
+                    response.raise_for_status()
+                    break
+                except httpx.TransportError:
+                    if attempt == 2:
+                        raise
+                    time.sleep(2 * (attempt + 1))
             for text, vector in zip(chunk, response.json()["embeddings"]):
                 v = np.asarray(vector, dtype=np.float32)
                 self._cache[text] = v / np.linalg.norm(v)

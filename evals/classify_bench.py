@@ -169,6 +169,8 @@ def main() -> int:
             start = time.perf_counter()
             classifier = build(name, train, embedder)
             train_s = time.perf_counter() - start
+            if embedder is not None:
+                embedder.clear()  # time real embeddings, not ones another classifier cached
             preds, latencies, cost = {}, [], 0.0
             for case in test:
                 t0 = time.perf_counter()
