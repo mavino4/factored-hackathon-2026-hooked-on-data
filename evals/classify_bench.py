@@ -6,8 +6,10 @@
 
 ``rules`` needs nothing; ``ml`` and the embedding classifiers are trained here on
 evals/intents/train.jsonl only. ``bge-m3-*`` need Ollama with bge-m3; ``openai-3s-*``
-(text-embedding-3-small) need OPENAI_API_KEY in .env and are skipped without it, and
-cache their vectors in evals/intents/.cache/. ``*-logreg|knn|rf|boost`` is the model on
+(text-embedding-3-small) need OPENAI_API_KEY in .env and are skipped without it. Every
+vector is cached in evals/intents/.cache/ with the latency and tokens of its call: a
+message is embedded once per provider, all models on top reuse it, and repeated runs
+neither pay nor wait. ``*-logreg|knn|rf|boost`` is the model on
 the vectors. ``jev`` is TypeSafe's decision model (TYPESAFE_API_KEY in .env), cached in
 evals/intents/jev_predictions.jsonl like the LLM. ``llm`` is
 the production classifier (agent/intent.py through the gateway, same prompt, model and
@@ -31,7 +33,7 @@ from pathlib import Path
 os.environ.setdefault("AIP_AUTH_MODE", "dev")
 
 from aiplatform.agent import intent as intents
-from aiplatform.agent.classifiers import INTENTS, Prediction, with_follow_up
+from aiplatform.agent.classifiers import INTENTS, Prediction, normalize, with_follow_up
 from aiplatform.agent.classifiers.rules import RuleClassifier
 from evals.intent_dataset import TEST, TRAIN, read
 
@@ -182,14 +184,23 @@ def embedder_for(name: str, embedders: dict):
     if family not in embedders:
         from aiplatform.agent.classifiers import embeddings
         if family == "bge-m3":
-            embedder = embeddings.OllamaEmbedder()
-            embedder.embed(["warm up"])  # load the model before timing anything
+            embedder = embeddings.OllamaEmbedder(cache_dir=CACHE_DIR)
+            embedder._fetch(["warm up"])  # load the model on the GPU before timing anything
         else:
             from aiplatform.config import get_settings
             key = get_settings().openai_api_key
             embedder = embeddings.OpenAIEmbedder(key.get_secret_value(), cache_dir=CACHE_DIR)
         embedders[family] = embedder
     return embedders[family]
+
+
+def embed_pass(embedder, test: list[dict], done: dict) -> dict[str, dict]:
+    """Each test message embedded once per provider, one call per message as in live
+    traffic; latency and tokens are measured the first time and cached on disk with the
+    vector, so every model on top (and every later run) reuses them for free."""
+    if embedder.name not in done:
+        done[embedder.name] = embedder.timed_embed([normalize(c["text"]) for c in test])
+    return done[embedder.name]
 
 
 def build(name: str, train: list[dict], embedder):
@@ -242,6 +253,7 @@ def main() -> int:
         names = [n for n in names if n != "jev"]
 
     embedders: dict = {}
+    embed_calls: dict = {}  # provider -> {text: {"ms", "tokens"}}
     results, predictions = {}, {}
     for name in names:
         embedder = embedder_for(name, embedders)
@@ -265,20 +277,21 @@ def main() -> int:
             classifier = build(name, train, embedder)
             train_s = time.perf_counter() - start
             if embedder is not None:
-                # Time real embedding calls, not vectors cached by training or another run.
-                embedder.clear()
-                embedder.read_disk = False
-                tokens_before = getattr(embedder, "tokens", 0)
+                calls = embed_pass(embedder, test, embed_calls)
             preds, latencies, cost = {}, [], 0.0
             for case in test:
                 t0 = time.perf_counter()
                 preds[case["id"]] = with_follow_up(classifier, case["text"], history_of(case))
                 latencies.append(time.perf_counter() - t0)
             if embedder is not None:
-                embedder.read_disk = True
+                # The vectors were embedded once for this provider (embed_pass): add each
+                # message's measured embedding call to the model's own time, and its cost.
+                latencies = [s + calls[normalize(c["text"])]["ms"] / 1000
+                             for s, c in zip(latencies, test)]
                 if name.startswith("openai-"):
                     from aiplatform.agent.classifiers.embeddings import OPENAI_EMBED_USD_PER_MTOK
-                    cost = (embedder.tokens - tokens_before) * OPENAI_EMBED_USD_PER_MTOK / 1e6
+                    tokens = sum(calls[normalize(c["text"])]["tokens"] for c in test)
+                    cost = tokens * OPENAI_EMBED_USD_PER_MTOK / 1e6
         result = score(test, {k: p.intent for k, p in preds.items()})
         result["latency_ms"] = {q: round(1000 * percentile(latencies, v), 2)
                                 for q, v in (("p50", 0.5), ("p95", 0.95), ("p99", 0.99))}
@@ -293,6 +306,8 @@ def main() -> int:
         if name != "llm":  # the LLM gives no probability
             result["coverage"] = coverage(test, preds)
         results[name], predictions[name] = result, preds
+        print(f"  {name}: accuracy {result['accuracy']:.3f}, trained in {train_s:.0f} s",
+              flush=True)
 
     print(f"\n{'classifier':<19}{'acc':>6}{'macroF1':>9}{'attack R':>10}{'false atk':>11}"
           f"{'p50 ms':>9}{'p95 ms':>9}{'p99 ms':>9}{'$/1k':>9}")

@@ -5,13 +5,16 @@ Embedders (same interface: ``name``, ``embed``, ``clear``):
 - ``OllamaEmbedder``: bge-m3 (1024 dimensions, multilingual) served by local Ollama
   (``ollama pull bge-m3``).
 - ``OpenAIEmbedder``: OpenAI text-embedding-3-small (1536 dimensions, multilingual), with
-  OPENAI_API_KEY from ``.env``. Vectors are also cached on disk, so repeated runs neither
-  pay nor wait.
+  OPENAI_API_KEY from ``.env``.
+
+Both cache every vector on disk (``CachedEmbedder``): a message is embedded once, the same
+vector serves every model on top, and repeated runs neither pay nor wait.
 
 Classifiers on the vectors (``EmbeddingClassifier(method=...)``): logistic regression
 (``logreg``), nearest-neighbour vote (``knn``), random forest (``rf``) and gradient
 boosting (``boost``). Needs scikit-learn (dependency group ``classifiers``)."""
 
+import json
 import time
 from pathlib import Path
 
@@ -33,86 +36,124 @@ def _unit(vector) -> np.ndarray:
     return v / np.linalg.norm(v)
 
 
-class OllamaEmbedder:
-    name = "bge-m3"
+class CachedEmbedder:
+    """Vectors cached in memory and, with ``cache_dir``, on disk: a text is embedded once,
+    whatever classifier uses it and however often the bench runs. ``timed_embed`` embeds
+    one text per call and remembers each call's latency and tokens, so a real per-message
+    cost is measured once and then read back. Subclasses fetch a batch of vectors."""
 
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = EMBED_MODEL,
-                 batch: int = 64):
-        self._client = httpx.Client(base_url=base_url, timeout=600)
-        self._model, self._batch = model, batch
+    name = "cached"
+    file_stem = "cached"
+
+    def __init__(self, cache_dir: Path | None = None, batch: int = 64):
+        self._batch = batch
         self._cache: dict[str, np.ndarray] = {}
-
-    def clear(self) -> None:
-        self._cache.clear()
-
-    def embed(self, texts: list[str]) -> np.ndarray:
-        """Unit vectors, one row per text."""
-        missing = list(dict.fromkeys(t for t in texts if t not in self._cache))
-        for i in range(0, len(missing), self._batch):
-            chunk = missing[i:i + self._batch]
-            for attempt in range(3):  # Ollama drops the connection while swapping models
-                try:
-                    response = self._client.post("/api/embed", json={
-                        "model": self._model, "input": chunk, "keep_alive": "30m"})
-                    response.raise_for_status()
-                    break
-                except httpx.TransportError:
-                    if attempt == 2:
-                        raise
-                    time.sleep(2 * (attempt + 1))
-            for text, vector in zip(chunk, response.json()["embeddings"]):
-                self._cache[text] = _unit(vector)
-        return np.stack([self._cache[t] for t in texts])
-
-
-class OpenAIEmbedder:
-    """text-embedding-3-small through the official SDK. ``tokens`` counts what was billed;
-    ``read_disk = False`` makes it call the API even for texts cached on disk (to time
-    real calls)."""
-
-    name = "openai-3s"
-
-    def __init__(self, api_key: str, *, model: str = OPENAI_EMBED_MODEL,
-                 cache_dir: Path | None = None, batch: int = 256, http_client=None):
-        from openai import OpenAI
-
-        self._client = OpenAI(api_key=api_key, http_client=http_client)
-        self._model, self._batch = model, batch
-        self._cache: dict[str, np.ndarray] = {}
-        self._path = cache_dir / f"{model}.npz" if cache_dir else None
-        self._disk: dict[str, np.ndarray] = {}
+        self._meta: dict[str, dict] = {}  # text -> {"ms": latency, "tokens": billed}
+        self._path = cache_dir / f"{self.file_stem}.npz" if cache_dir else None
+        self.tokens = 0  # billed during this run
         if self._path and self._path.exists():
-            data = np.load(self._path)
-            self._disk = dict(zip(data["texts"].tolist(), data["vectors"]))
-        self.read_disk = True
-        self.tokens = 0
+            try:
+                data = np.load(self._path)
+                self._cache = dict(zip(data["texts"].tolist(), data["vectors"]))
+                meta = self._path.with_suffix(".json")
+                if meta.exists():
+                    self._meta = json.loads(meta.read_text())
+            except (OSError, ValueError, KeyError) as exc:  # e.g. cut mid-write
+                print(f"ignoring a damaged embeddings cache {self._path}: {exc}")
+                self._cache, self._meta = {}, {}
+
+    def _fetch(self, texts: list[str]) -> tuple[list, int]:
+        """Raw vectors for ``texts`` and the tokens billed."""
+        raise NotImplementedError
 
     def clear(self) -> None:
         self._cache.clear()
 
     def _save(self) -> None:
-        if self._path:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            texts = list(self._disk)
-            np.savez(self._path, texts=np.array(texts),
-                     vectors=np.stack([self._disk[t] for t in texts]))
+        if not self._path or not self._cache:
+            return
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        texts = list(self._cache)
+        tmp = self._path.with_name(self._path.stem + ".tmp.npz")
+        np.savez(tmp, texts=np.array(texts), vectors=np.stack([self._cache[t] for t in texts]))
+        tmp.replace(self._path)  # atomic: a killed run never leaves half a file
+        meta, tmp_meta = self._path.with_suffix(".json"), self._path.with_suffix(".tmp.json")
+        tmp_meta.write_text(json.dumps(self._meta, ensure_ascii=False))
+        tmp_meta.replace(meta)
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        if self.read_disk:
-            for t in texts:
-                if t not in self._cache and t in self._disk:
-                    self._cache[t] = self._disk[t]
+        """Unit vectors, one row per text; only missing texts are fetched, in batches."""
         missing = list(dict.fromkeys(t for t in texts if t not in self._cache))
         for i in range(0, len(missing), self._batch):
             chunk = missing[i:i + self._batch]
-            response = self._client.embeddings.create(model=self._model, input=chunk)
-            self.tokens += response.usage.prompt_tokens
-            for item in sorted(response.data, key=lambda d: d.index):
-                self._cache[chunk[item.index]] = self._disk[chunk[item.index]] = (
-                    _unit(item.embedding))
+            vectors, tokens = self._fetch(chunk)
+            self.tokens += tokens
+            for text, vector in zip(chunk, vectors):
+                self._cache[text] = _unit(vector)
         if missing:
             self._save()
         return np.stack([self._cache[t] for t in texts])
+
+    def timed_embed(self, texts: list[str]) -> dict[str, dict]:
+        """Embed each text in its own call, as a live message would be, and return its
+        latency (ms) and tokens. Measured once per text; later runs read them back."""
+        todo = [t for t in dict.fromkeys(texts) if "ms" not in self._meta.get(t, {})]
+        for text in todo:
+            start = time.perf_counter()
+            vectors, tokens = self._fetch([text])
+            self._meta[text] = {"ms": (time.perf_counter() - start) * 1000, "tokens": tokens}
+            self._cache[text] = _unit(vectors[0])
+            self.tokens += tokens
+        if todo:
+            self._save()
+        return {t: self._meta[t] for t in texts}
+
+
+class OllamaEmbedder(CachedEmbedder):
+    """bge-m3 on local Ollama (free)."""
+
+    name = "bge-m3"
+    file_stem = "bge-m3"
+
+    def __init__(self, base_url: str = "http://localhost:11434", model: str = EMBED_MODEL,
+                 cache_dir: Path | None = None, batch: int = 64):
+        super().__init__(cache_dir, batch)
+        self._client = httpx.Client(base_url=base_url, timeout=600)
+        self._model = model
+
+    def _fetch(self, texts: list[str]) -> tuple[list, int]:
+        for attempt in range(3):  # Ollama drops the connection while swapping models
+            try:
+                response = self._client.post("/api/embed", json={
+                    "model": self._model, "input": texts, "keep_alive": "30m"})
+                response.raise_for_status()
+                body = response.json()
+                return body["embeddings"], body.get("prompt_eval_count", 0)
+            except httpx.TransportError:
+                if attempt == 2:
+                    raise
+                time.sleep(2 * (attempt + 1))
+        raise RuntimeError("unreachable")
+
+
+class OpenAIEmbedder(CachedEmbedder):
+    """OpenAI text-embedding-3-small through the official SDK (billed per token)."""
+
+    name = "openai-3s"
+    file_stem = OPENAI_EMBED_MODEL
+
+    def __init__(self, api_key: str, *, model: str = OPENAI_EMBED_MODEL,
+                 cache_dir: Path | None = None, batch: int = 256, http_client=None):
+        from openai import OpenAI
+
+        super().__init__(cache_dir, batch)
+        self._client = OpenAI(api_key=api_key, http_client=http_client)
+        self._model = model
+
+    def _fetch(self, texts: list[str]) -> tuple[list, int]:
+        response = self._client.embeddings.create(model=self._model, input=texts)
+        vectors = [d.embedding for d in sorted(response.data, key=lambda d: d.index)]
+        return vectors, response.usage.prompt_tokens
 
 
 # Small grids, chosen by 5-fold cross-validation on the training set only (3 for boosting,

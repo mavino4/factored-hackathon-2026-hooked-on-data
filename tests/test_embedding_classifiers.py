@@ -52,7 +52,7 @@ def test_each_model_learns_the_vectors(method):
         assert 0.0 < prediction.confidence <= 1.0
 
 
-def test_openai_embedder_batches_normalizes_and_caches(tmp_path):
+def test_openai_embedder_embeds_each_text_once_and_measures_it_once(tmp_path):
     httpx2 = pytest.importorskip("httpx2")
     pytest.importorskip("openai")
     from aiplatform.agent.classifiers.embeddings import OpenAIEmbedder
@@ -61,7 +61,7 @@ def test_openai_embedder_batches_normalizes_and_caches(tmp_path):
 
     def handler(request):
         body = json.loads(request.content)
-        calls.append(body)
+        calls.append(body["input"])
         data = [{"object": "embedding", "index": i, "embedding": [3.0, 4.0] if "a" in t
                  else [0.0, 2.0]} for i, t in enumerate(body["input"])]
         return httpx2.Response(200, json={
@@ -73,16 +73,14 @@ def test_openai_embedder_batches_normalizes_and_caches(tmp_path):
                               http_client=httpx2.Client(transport=httpx2.MockTransport(handler)))
 
     first = embedder()
-    vectors = first.embed(["a", "b", "a"])
-    assert [c["input"] for c in calls] == [["a", "b"]]  # one request, no duplicates
-    assert calls[0]["model"] == "text-embedding-3-small"
+    vectors = first.embed(["a", "b", "a"])  # training: one batch, no duplicates
     np.testing.assert_allclose(vectors, [[0.6, 0.8], [0.0, 1.0], [0.6, 0.8]], rtol=1e-6)
-    assert first.tokens == 7
+    measured = first.timed_embed(["c", "d"])  # test: one call per message, timed
+    assert calls == [["a", "b"], ["c"], ["d"]]
+    assert measured["c"]["tokens"] == 7 and measured["c"]["ms"] >= 0
+    assert first.tokens == 21
 
-    second = embedder()  # a new run reads the disk cache
+    second = embedder()  # a later run: vectors, latency and tokens come from disk
     second.embed(["a", "b"])
-    assert len(calls) == 1
-    second.clear()
-    second.read_disk = False  # timing real calls: ask the API again
-    second.embed(["b"])
-    assert [c["input"] for c in calls] == [["a", "b"], ["b"]]
+    assert second.timed_embed(["c"]) == {"c": measured["c"]}
+    assert len(calls) == 3 and second.tokens == 0
