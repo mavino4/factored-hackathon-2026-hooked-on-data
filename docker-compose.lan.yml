@@ -15,6 +15,10 @@ services:
       # traces filed under Langfuse's "production" environment.
       AIP_ENV: ${AIP_ENV:-dev}
       AIP_AUTH_MODE: password
+      # Jev first, the LLM below AIP_JEV_THRESHOLD (needs TYPESAFE_API_KEY in .env; without
+      # it the LLM classifies). AIP_INTENT_CLASSIFIER=llm make prod: the LLM only.
+      AIP_INTENT_CLASSIFIER: ${AIP_INTENT_CLASSIFIER:-jev_llm}
+      AIP_JEV_THRESHOLD: ${AIP_JEV_THRESHOLD:-0.9}
       # HTTPS only: browsers never send the session cookie over plain HTTP.
       AIP_SESSION_COOKIE_SECURE: "true"
       AIP_PROVIDERS: '["anthropic"]'

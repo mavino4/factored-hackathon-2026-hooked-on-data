@@ -36,6 +36,9 @@ from aiplatform import metrics
 from aiplatform.agent import intent as intents
 from aiplatform.agent import quick
 from aiplatform.agent.actions import ActionStore, PendingAction
+from aiplatform.agent.classifiers.jev import MODEL as JEV_MODEL
+from aiplatform.agent.classifiers.jev import JevClassifier
+from aiplatform.agent.classifiers.jev import cost_usd as jev_cost
 from aiplatform.agent.events import (
     AgentDone,
     AgentText,
@@ -57,7 +60,9 @@ from aiplatform.graph_stream import emitter
 from aiplatform.llm.gateway import AIGateway, Completed, GatewayError, TextDelta
 from aiplatform.llm.models import ROUTES
 from aiplatform.tracing import (
+    decision_span,
     flag_prompt_injection,
+    record_classifier,
     record_intent,
     record_outcome,
     register_sensitive,
@@ -211,7 +216,8 @@ def _last_customer_text(conv: Conversation) -> str | None:
 
 def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage: UsageStore,
                       actions: ActionStore, handoffs: HandoffStore, tools: dict[str, Tool],
-                      max_iterations: int):
+                      max_iterations: int, jev: JevClassifier | None = None,
+                      jev_threshold: float = 0.9):
     definitions = [t.definition() for t in tools.values()]  # fixed per route for caching
     route = ROUTES["agent"]
     classify_route = ROUTES["classify"]
@@ -230,9 +236,28 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         await emit(AgentDone("handoff", "", []))
         return {}
 
-    @traced_node("classify", lambda s: {"message": _last_customer_text(s["conv"])})
-    async def classify(state: AgentState) -> dict:
-        """What does the customer want, can we resolve it, and does it need the tools?"""
+    async def ask_jev(messages: list[dict]) -> tuple[intents.Intent | None, float | None]:
+        """Jev's intent if it is sure enough (else None), and its confidence. Raises when
+        the call fails; the caller then asks the LLM."""
+        text = jev.state(messages)  # masked: TypeSafe never sees names, figures or IDs
+        async with decision_span("classify.jev", model=JEV_MODEL, state=text) as span:
+            try:
+                prediction, extra = await jev.classify_state(text)
+            except Exception as exc:
+                span.update(level="ERROR", status_message=type(exc).__name__)
+                raise
+            span.update(model=extra["model"] or JEV_MODEL, output={
+                "intent": prediction.intent, "confidence": prediction.confidence,
+                "probabilities": extra["probabilities"], "insistence": extra["insistence"]},
+                usage_details={"input": extra["input_tokens"]},
+                cost_details={"total": jev_cost(extra["input_tokens"])})
+        if prediction.intent not in intents.INTENTS or prediction.confidence < jev_threshold:
+            return None, prediction.confidence
+        return intents.Intent(prediction.intent, needs_tools=prediction.intent == "account",
+                              insistence=extra["insistence"],
+                              reason=prediction.reason), prediction.confidence
+
+    async def ask_llm(state: AgentState) -> intents.Intent:
         conv = state["conv"]
         try:
             completed = await gateway.complete(
@@ -243,10 +268,28 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         except (GatewayError, anthropic.APIError):
             # Never lose the turn over the classifier: answer with the full agent.
             log.warning("intent classifier unavailable; using the full agent", exc_info=True)
-            intent = intents.FALLBACK
-        else:
-            await record(state, completed, classify_route.name)
-            intent = intents.parse(completed.message)
+            return intents.FALLBACK
+        await record(state, completed, classify_route.name)
+        return intents.parse(completed.message)
+
+    @traced_node("classify", lambda s: {"message": _last_customer_text(s["conv"])})
+    async def classify(state: AgentState) -> dict:
+        """What does the customer want, can we resolve it, and does it need the tools?
+        With Jev (AIP_INTENT_CLASSIFIER=jev_llm) it decides when it is sure enough; the
+        LLM decides the rest, and everything when Jev is off or fails."""
+        conv = state["conv"]
+        intent, source, confidence = None, "llm", None
+        if jev is not None:
+            try:
+                intent, confidence = await ask_jev(conv.messages)
+                source = "jev" if intent is not None else "llm_low_confidence"
+            except Exception:
+                log.warning("Jev unavailable; the LLM classifies", exc_info=True)
+                source = "llm_jev_error"
+        if intent is None:
+            intent = await ask_llm(state)
+        metrics.AGENT_CLASSIFIER.labels(source).inc()
+        record_classifier(source, confidence)
         metrics.AGENT_INTENTS.labels(intent.name).inc()
         record_intent(intent.name)
         if intent.name == "attack":

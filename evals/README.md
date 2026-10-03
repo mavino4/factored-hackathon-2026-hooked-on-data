@@ -96,6 +96,7 @@ make trace-report ARGS="--routing intent"      # only turns routed by AIP_QUICK_
 make trace-score ARGS="--dry-run"              # grade turns, write nothing
 make trace-score                               # write the grades to Langfuse as scores
 make trace-score ARGS="--judge --sample 50"    # also an LLM judge (spends API credits)
+make trace-score ARGS="--judge-jev --sample 40"  # does the LLM agree with Jev's decisions?
 ```
 
 `trace-report` (`evals/traces.py`, read-only) prints and saves to `results/traces-<UTC>.json`:
@@ -104,6 +105,7 @@ make trace-score ARGS="--judge --sample 50"    # also an LLM judge (spends API c
 |---|---|
 | Latency | p50 / p95 / p99 / max of the whole turn, the classifier, each model call, the first token and each tool. Below about 100 values (`n`) the p99 is close to the max |
 | Cost | Total, per turn, per conversation, the classifier's share, tokens per turn, cache reads |
+| Classifier | Who decided the intent (`jev`, `llm`, `llm_low_confidence`, `llm_jev_error`): turns, classification latency and cost, turn p95, Jev/LLM agreement |
 | Intent | Share, p95 and p99 latency and mean cost of each classified intent |
 | Routing | Per `AIP_QUICK_ACTIONS` mode (`model` = classifier, `intent`, `direct` = no model): turns, quick-action turns, latency, mean cost and model calls per turn. Compare modes on quick-action turns only (`--quick`): the questions are then the same |
 | Outcome | How turns ended: `done`, `blocked`, `handoff`, `max_iterations`, `incomplete` (no final step: an error or the customer left) |

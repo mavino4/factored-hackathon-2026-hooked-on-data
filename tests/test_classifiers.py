@@ -84,7 +84,7 @@ async def test_jev_asks_a_choice_question_and_reads_the_answer():
         await jev.close()
     assert (prediction.intent, prediction.confidence) == ("account", 0.83)
     assert extra == {"probabilities": {"account": 0.9, "general": 0.1}, "model": "jev-1.13.0",
-                     "input_tokens": 410}
+                     "input_tokens": 410, "insistence": False}
     assert len(calls) == 2 and str(calls[1].url) == API_URL
     assert calls[1].headers["authorization"] == "Bearer ts-test"
     body = json.loads(calls[1].content)

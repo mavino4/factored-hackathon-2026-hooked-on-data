@@ -181,3 +181,19 @@ def test_api_follows_the_cursor_and_decodes_payloads():
     assert seen[0]["fromStartTime"] == "2026-10-01T00:00:00Z" and seen[0]["type"] == "SPAN"
     assert seen[1]["cursor"] == "next"
     assert decoded("not json {") == "not json {"
+
+
+def test_turns_are_grouped_by_who_decided_the_intent():
+    jev_turn = [root("t6", 2.0), obs("t6", "classify", n=1),
+                generation("t6", "classify.jev", 0.00001, 1),
+                obs("t6", "call_model", n=2), generation("t6", "agent.anthropic", 0.002, 2)]
+    scores = [{"name": "classifier", "value": "jev", "subject": {"kind": "trace", "id": "t6"}},
+              {"name": "jev_confidence", "value": 0.97, "subject": {"kind": "trace", "id": "t6"}},
+              {"name": "jev_agrees_llm", "value": True, "subject": {"kind": "trace", "id": "t6"}}]
+    turns = build_turns([*account_turn(), *jev_turn], scores)
+    assert [(t.classifier, t.jev_confidence) for t in turns] == [("llm", None), ("jev", 0.97)]
+    by = summarize(turns)["by_classifier"]
+    assert by["jev"]["turns"] == 1 and by["jev"]["share"] == 0.5
+    assert by["jev"]["classify_cost_mean_usd"] == 0.00001
+    assert by["jev"]["jev_agrees_with_llm"] == 1.0
+    assert by["llm"]["jev_agrees_with_llm"] is None

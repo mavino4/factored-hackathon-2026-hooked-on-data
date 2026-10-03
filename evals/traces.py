@@ -32,7 +32,7 @@ from evals.langfuse_api import LangfuseAPI
 EVALS_DIR = Path(__file__).parent
 DEFAULT_SLO = EVALS_DIR / "trace_slo.json"
 # Scores written by evals/score_traces.py; the report shows their pass rate.
-QUALITY_SCORES = ("language_match", "no_leak", "used_bank_tool", "helpfulness")
+QUALITY_SCORES = ("language_match", "no_leak", "used_bank_tool", "helpfulness", "jev_agrees_llm")
 BANK_TOOLS = {"get_products", "get_customer_profile"}
 
 
@@ -48,6 +48,10 @@ class Turn:
     # mode; and the quick action that sent it, if any. Older traces: "model", None.
     routing: str = "model"
     quick_action: str | None = None
+    # Who decided the intent (score "classifier": jev, llm, llm_low_confidence,
+    # llm_jev_error) and Jev's confidence. Older traces: "llm".
+    classifier: str = "llm"
+    jev_confidence: float | None = None
     latency_s: float | None = None
     intent: str | None = None
     outcome: str | None = None
@@ -159,6 +163,9 @@ def build_turns(observations: list[dict], scores: list[dict] = ()) -> list[Turn]
             elif name == "finish" and isinstance(obs.get("input"), dict):
                 turn.outcome = obs["input"].get("outcome")
         turn.intent = turn.scores.get("intent") or turn.intent
+        turn.classifier = turn.scores.get("classifier") or turn.classifier
+        if turn.scores.get("jev_confidence") is not None:
+            turn.jev_confidence = _number(turn.scores["jev_confidence"])
         turn.outcome = turn.scores.get("outcome") or turn.outcome or (
             "blocked" if "refuse_attack" in names
             else "handoff" if names & {"handoff", "wait_for_human"}
@@ -204,8 +211,11 @@ def summarize(turns: list[Turn], meta: dict | None = None) -> dict:
     intents = Counter(t.intent or "none" for t in turns)
     intent_s: dict[str, list[float]] = defaultdict(list)
     routing_turns: dict[str, list[Turn]] = defaultdict(list)
+    classifier_turns: dict[str, list[Turn]] = defaultdict(list)
     for t in turns:
         routing_turns[t.routing].append(t)
+        if t.classify_s:  # turns that went through a classifier (Jev, the LLM or both)
+            classifier_turns[t.classifier].append(t)
         if t.latency_s is not None:
             intent_s[t.intent or "none"].append(t.latency_s)
     outcomes = Counter(t.outcome for t in turns)
@@ -260,6 +270,21 @@ def summarize(turns: list[Turn], meta: dict | None = None) -> dict:
                    "model_calls_per_turn": mean(
                        [len(t.model_s) + len(t.classify_s) for t in group], 2)}
             for name, group in sorted(routing_turns.items())},
+        "by_classifier": {
+            name: {"turns": len(group),
+                   "share": rate(len(group), sum(len(g) for g in classifier_turns.values())),
+                   # The classification step: every classify.* call of the turn (Jev, LLM).
+                   "classify": spread([sum(t.classify_s) for t in group if t.classify_s]),
+                   "classify_cost_mean_usd": mean([t.classify_cost for t in group]),
+                   "turn": spread([t.latency_s for t in group if t.latency_s is not None]),
+                   "jev_confidence_mean": mean([t.jev_confidence for t in group
+                                                if t.jev_confidence is not None], 3),
+                   "intents": dict(Counter(t.intent or "none" for t in group)),
+                   "blocked_rate": rate(sum(t.outcome == "blocked" for t in group), len(group)),
+                   "jev_agrees_with_llm": rate(
+                       sum(1 for t in group if t.scores.get("jev_agrees_llm") in (True, 1, 1.0)),
+                       sum(1 for t in group if "jev_agrees_llm" in t.scores))}
+            for name, group in sorted(classifier_turns.items())},
         "outcomes": {name: {"turns": count, "share": rate(count, n)}
                      for name, count in outcomes.most_common()},
         "behaviour": {
@@ -345,6 +370,13 @@ def print_report(s: dict) -> None:
         print(f"{name:<16}{v['turns']:>7} {v['quick_actions']:>7} {_fmt(lat['p50_s'], 's'):>8} "
               f"{_fmt(lat['p95_s'], 's'):>8} {_fmt(lat['p99_s'], 's'):>8} "
               f"{_fmt(v['mean_cost_usd'], '$'):>10} {_fmt(v['model_calls_per_turn']):>6}")
+    print("\nClassifier         turns  share  classify p50  p95  cost/turn   turn p95  "
+          "Jev agrees with LLM")
+    for name, v in s["by_classifier"].items():
+        c, t = v["classify"], v["turn"]
+        print(f"{name:<18}{v['turns']:>6} {_fmt(v['share'], '%'):>6} {_fmt(c['p50_s'], 's'):>13}"
+              f" {_fmt(c['p95_s'], 's'):>5} {_fmt(v['classify_cost_mean_usd'], '$'):>10}"
+              f" {_fmt(t['p95_s'], 's'):>10}  {_fmt(v['jev_agrees_with_llm'], '%')}")
     print("\nOutcome: " + " · ".join(f"{name} {_fmt(v['share'], '%')} ({v['turns']})"
                                       for name, v in s["outcomes"].items()))
     b = s["behaviour"]
@@ -392,7 +424,7 @@ def to_case(turn: Turn) -> dict:
 
 def load_turns(api: LangfuseAPI, since: datetime, until: datetime | None = None,
                release: str | None = None, routing: str | None = None,
-               quick_only: bool = False) -> list[Turn]:
+               quick_only: bool = False, classifier: str | None = None) -> list[Turn]:
     observations = [o for o in api.observations(since, until)]
     # Inputs and outputs only where they are small and needed: steps and the run itself.
     detailed = {o["id"]: o for kind in ("SPAN", "AGENT")
@@ -401,7 +433,8 @@ def load_turns(api: LangfuseAPI, since: datetime, until: datetime | None = None,
     turns = build_turns(observations, list(api.scores(since)))
     return [t for t in turns if (release is None or t.release == release)
             and (routing is None or t.routing == routing)
-            and (not quick_only or t.quick_action)]
+            and (not quick_only or t.quick_action)
+            and (classifier is None or t.classifier == classifier)]
 
 
 def main() -> int:
@@ -410,6 +443,8 @@ def main() -> int:
     parser.add_argument("--until", help="ISO date (UTC); default: now")
     parser.add_argument("--release", help="only turns served by this release (git commit)")
     parser.add_argument("--routing", help="only turns routed this way: model, intent...")
+    parser.add_argument("--classifier",
+                        help="only turns whose intent this decided: jev, llm, llm_low_confidence...")
     parser.add_argument("--quick", action="store_true",
                         help="only turns sent by a quick-action button")
     parser.add_argument("--check", nargs="?", const=str(DEFAULT_SLO), metavar="SLO_JSON",
@@ -426,7 +461,7 @@ def main() -> int:
     try:
         turns = load_turns(api, parse_since(args.since),
                            parse_since(args.until) if args.until else None, args.release,
-                           args.routing, args.quick)
+                           args.routing, args.quick, args.classifier)
     finally:
         api.close()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -445,7 +480,7 @@ def main() -> int:
     summary = summarize(turns, {"timestamp": datetime.now(UTC).isoformat(),
                                 "since": args.since, "until": args.until,
                                 "release": args.release, "routing": args.routing,
-                                "quick": args.quick})
+                                "quick": args.quick, "classifier": args.classifier})
     print_report(summary)
     out = out_dir / f"traces-{stamp}.json"
     out.write_text(json.dumps({**summary, "turn_rows": [

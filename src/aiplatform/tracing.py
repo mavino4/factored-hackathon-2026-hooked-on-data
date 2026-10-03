@@ -117,6 +117,32 @@ async def llm_span(name: str, *, model: str, params: dict[str, Any],
 
 
 @asynccontextmanager
+async def decision_span(name: str, *, model: str, state: str) -> AsyncIterator[Any]:
+    """A ``generation`` for one call to a decision model (Jev): ``state`` is what was sent
+    (already masked); update it with the answer, ``usage_details`` and ``cost_details``."""
+    tracing = _active.get()
+    if tracing is None:
+        yield _NoSpan()
+        return
+    with tracing._client.start_as_current_observation(
+            as_type="generation", name=name, model=model, input={"state": state}) as span:
+        yield span
+
+
+def record_classifier(source: str, jev_confidence: float | None = None) -> None:
+    """Who decided the intent of the current trace (``jev``, ``llm``, ``llm_low_confidence``,
+    ``llm_jev_error``) and Jev's confidence, as scores to compare them in Langfuse."""
+    tracing = _active.get()
+    if tracing is None:
+        return
+    tracing._client.score_current_trace(name="classifier", value=source,
+                                        data_type="CATEGORICAL")
+    if jev_confidence is not None:
+        tracing._client.score_current_trace(name="jev_confidence", value=jev_confidence,
+                                            data_type="NUMERIC")
+
+
+@asynccontextmanager
 async def tool_span(name: str, args: dict[str, Any],
                     metadata: dict[str, Any]) -> AsyncIterator[Any]:
     """A ``tool`` observation for one tool call (a no-op outside a traced run)."""

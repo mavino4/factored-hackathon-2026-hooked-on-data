@@ -73,9 +73,14 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("OPENAI_API_KEY", "AIP_OPENAI_API_KEY"))
 
-    # TypeSafe AI key, for Jev (agent/classifiers/jev.py); only the classifier bench uses it.
+    # TypeSafe AI key, for Jev (agent/classifiers/jev.py).
     typesafe_api_key: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("TYPESAFE_API_KEY", "AIP_TYPESAFE_API_KEY"))
+    # Intent classifier before the agent. "llm": the model (agent/intent.py). "jev_llm":
+    # Jev first, on the masked transcript; its answer is taken at or above
+    # ``jev_threshold`` confidence, and below it (or if Jev fails) the LLM decides.
+    intent_classifier: Literal["llm", "jev_llm"] = "llm"
+    jev_threshold: float = Field(default=0.9, ge=0.0, le=1.0)
 
     # Amazon Bedrock (Mantle client) - only needed when "bedrock" is in `providers`.
     aws_region: str | None = None

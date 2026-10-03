@@ -14,6 +14,9 @@ REJECTED = Counter(
 # Customer messages by classified intent; "attack" counts manipulation attempts.
 AGENT_INTENTS = Counter(
     "aip_agent_intents_total", "Customer messages by classified intent", ["intent"])
+AGENT_CLASSIFIER = Counter(
+    "aip_agent_classifier_total",
+    "Who decided the intent: jev, llm, llm_low_confidence or llm_jev_error", ["source"])
 
 LLM_TTFT = Histogram(
     "aip_llm_time_to_first_token_seconds", "Model call start to first text token",

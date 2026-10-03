@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 
 from aiplatform.agent import quick
 from aiplatform.agent.actions import ActionStore
+from aiplatform.agent.classifiers.jev import JevClassifier
 from aiplatform.agent.events import (  # noqa: F401  (re-exported for callers)
     AgentDone,
     AgentEvent,
@@ -53,7 +54,8 @@ class AgentRunner:
     def __init__(self, gateway: AIGateway, repo: ConversationRepository, usage: UsageStore,
                  inflight: InFlight, actions: ActionStore, tools: list[Tool], *,
                  handoffs: HandoffStore | None = None, max_iterations: int = 8,
-                 tracing: Tracing | None = None, quick_mode: QuickMode = "model"):
+                 tracing: Tracing | None = None, quick_mode: QuickMode = "model",
+                 jev: JevClassifier | None = None, jev_threshold: float = 0.9):
         self._gateway = gateway
         self._repo = repo
         self._usage = usage
@@ -64,7 +66,8 @@ class AgentRunner:
         self._quick_mode = quick_mode
         self._graph = build_agent_graph(
             gateway=gateway, repo=repo, usage=usage, actions=actions, handoffs=self.handoffs,
-            tools={t.name: t for t in tools}, max_iterations=max_iterations)
+            tools={t.name: t for t in tools}, max_iterations=max_iterations,
+            jev=jev, jev_threshold=jev_threshold)
         self._config = {"recursion_limit": recursion_limit(max_iterations)}
 
     async def run(self, user_id: str, conversation_id: str, text: str,

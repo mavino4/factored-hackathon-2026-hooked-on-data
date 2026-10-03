@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import secrets
 import time
 import urllib.parse
 import uuid
@@ -21,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_client import start_http_server
 from pydantic import BaseModel, Field
 
-from aiplatform import metrics
+from aiplatform import metrics, privacy
 from aiplatform.accounts import (
     MIN_PASSWORD_LENGTH,
     Accounts,
@@ -30,6 +31,7 @@ from aiplatform.accounts import (
     WeakPassword,
 )
 from aiplatform.agent.actions import ActionNotPending, InMemoryActionStore
+from aiplatform.agent.classifiers.jev import JevClassifier
 from aiplatform.agent.handoffs import HandoffNotFound, InMemoryHandoffStore
 from aiplatform.agent.loop import (
     AgentDone,
@@ -67,6 +69,22 @@ from aiplatform.tracing import Tracing
 from aiplatform.usage import InMemoryUsageStore, TokenQuota
 
 log = logging.getLogger(__name__)
+
+
+def make_jev(settings: Settings) -> JevClassifier | None:
+    """Jev before the LLM classifier (AIP_INTENT_CLASSIFIER=jev_llm). It gets the
+    conversation masked like a trace: no names, last digits, amounts or IDs leave."""
+    if settings.intent_classifier != "jev_llm":
+        return None
+    if settings.typesafe_api_key is None:
+        log.warning("AIP_INTENT_CLASSIFIER=jev_llm without TYPESAFE_API_KEY: the LLM classifies")
+        return None
+    masker = privacy.Masker(secrets.token_bytes(32), mask_amounts=True)
+    log.info("intent classifier: Jev, then the LLM below %.2f confidence",
+             settings.jev_threshold)
+    # Short timeout, one retry: a slow Jev must not hold the turn; the LLM takes over.
+    return JevClassifier(settings.typesafe_api_key.get_secret_value(), timeout=5.0,
+                         attempts=2, mask=lambda messages: masker.mask(data=messages))
 
 
 class NewConversation(BaseModel):
@@ -163,11 +181,15 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             agent_tools = make_bank_tools(bank) if bank is not None else []
             if bank is None:
                 log.warning("AIP_BANK_DATABASE_URL not set: the agent has no banking tools")
+        jev = make_jev(settings)
         app.state.agent = AgentRunner(gw, repo, usage, inflight, actions, agent_tools,
                                       handoffs=handoffs, tracing=tracing,
-                                      quick_mode=settings.quick_actions)
+                                      quick_mode=settings.quick_actions,
+                                      jev=jev, jev_threshold=settings.jev_threshold)
         yield
         tracing.flush()
+        if jev is not None:
+            await jev.close()
         if bank is not None and bank_repo is None:
             await bank.close()
         if metrics_server is not None:

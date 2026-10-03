@@ -12,6 +12,12 @@ Deterministic checks (free) on every answered turn:
 ``--judge`` also asks the model whether the answer addresses the question
 (``helpfulness``), on a random sample: it spends API credits.
 
+``--judge-jev`` checks the Jev + LLM classifier (AIP_INTENT_CLASSIFIER=jev_llm): on a
+sample of the turns whose intent Jev decided alone, the production LLM classifier
+classifies the same message again and ``jev_agrees_llm`` records whether both agree (the
+comment says what each one said). It sees the masked message only, without the earlier
+turns, so a follow-up may disagree for lack of context. Spends API credits.
+
 A turn that already has a score is skipped, so running this again only grades new turns.
 The text is masked (``<NAME>``, ``<AMOUNT>``...): figures can't be verified here.
 """
@@ -88,6 +94,32 @@ async def judge_scores(settings, turns: list[Turn]) -> dict[str, tuple[bool, str
         await close_clients(clients)
 
 
+async def llm_intent(gateway: AIGateway, question: str) -> str:
+    """The production LLM classifier (agent/intent.py) on one message."""
+    from aiplatform.agent import intent as intents
+    from aiplatform.chat.prompts import CLASSIFY_SYSTEM_PROMPT
+
+    completed = await gateway.complete(
+        ROUTES["classify"], system=CLASSIFY_SYSTEM_PROMPT,
+        messages=intents.classify_messages([{"role": "user", "content": question}]),
+        tools=[intents.CLASSIFY_TOOL], tool_choice=intents.FORCE_CLASSIFY)
+    return intents.parse(completed.message).name
+
+
+async def jev_agreement(settings, turns: list[Turn]) -> dict[str, tuple[bool, str]]:
+    clients = build_clients(settings)
+    gateway = AIGateway(clients, settings)
+    try:
+        out = {}
+        for t in turns:
+            llm = await llm_intent(gateway, t.question)
+            out[t.trace_id] = (llm == t.intent,
+                               f"jev={t.intent} (confidence {t.jev_confidence}) llm={llm}")
+        return out
+    finally:
+        await close_clients(clients)
+
+
 def score_id(trace_id: str, name: str) -> str:
     # One score per trace and name: writing it again replaces it instead of duplicating.
     return f"{trace_id}-{name}"
@@ -99,7 +131,10 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="grade, but write nothing")
     parser.add_argument("--judge", action="store_true",
                         help="also grade helpfulness with the model (spends API credits)")
-    parser.add_argument("--sample", type=int, default=50, help="turns the judge grades")
+    parser.add_argument("--judge-jev", action="store_true",
+                        help="re-classify a sample of Jev-decided turns with the LLM "
+                             "(spends API credits)")
+    parser.add_argument("--sample", type=int, default=50, help="turns each judge grades")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -124,6 +159,13 @@ def main() -> int:
         chosen = random.Random(args.seed).sample(pending, min(args.sample, len(pending)))
         for trace_id, (passed, comment) in asyncio.run(judge_scores(settings, chosen)).items():
             new.append((trace_id, "helpfulness", passed, comment))
+
+    if args.judge_jev:
+        pending = [t for t in turns if t.classifier == "jev" and t.question
+                   and "jev_agrees_llm" not in t.scores]
+        chosen = random.Random(args.seed).sample(pending, min(args.sample, len(pending)))
+        for trace_id, (agrees, comment) in asyncio.run(jev_agreement(settings, chosen)).items():
+            new.append((trace_id, "jev_agrees_llm", agrees, comment))
 
     totals: dict[str, list[bool]] = defaultdict(list)
     for _, name, passed, _ in new:
