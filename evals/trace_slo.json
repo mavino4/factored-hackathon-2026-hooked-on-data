@@ -1,0 +1,11 @@
+{
+  "latency.turn.p95_s": {"max": 8},
+  "latency.turn.p99_s": {"max": 12},
+  "latency.classifier.p95_s": {"max": 3},
+  "latency.first_token.p95_s": {"max": 3},
+  "cost.per_turn_mean_usd": {"max": 0.005},
+  "behaviour.account_used_bank_tool_rate": {"min": 0.9},
+  "behaviour.error_rate": {"max": 0.02},
+  "behaviour.incomplete_rate": {"max": 0.05},
+  "behaviour.max_iterations_rate": {"max": 0.01}
+}

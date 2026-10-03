@@ -11,6 +11,7 @@ import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from anthropic.types import Message
@@ -164,6 +165,8 @@ class AIGateway:
                                         if not emitted:
                                             metrics.LLM_TTFT.labels(route.name, provider).observe(
                                                 time.perf_counter() - started)
+                                            # Langfuse's time to first token.
+                                            span.update(completion_start_time=datetime.now(UTC))
                                         emitted = True
                                         yield TextDelta(event.text)
                                 message = await stream.get_final_message()

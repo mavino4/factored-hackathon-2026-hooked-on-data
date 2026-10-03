@@ -51,7 +51,14 @@ from aiplatform.chat.repository import Conversation, ConversationRepository
 from aiplatform.graph_stream import emitter
 from aiplatform.llm.gateway import AIGateway, Completed, GatewayError, TextDelta
 from aiplatform.llm.models import ROUTES
-from aiplatform.tracing import flag_prompt_injection, register_sensitive, tool_span, traced_node
+from aiplatform.tracing import (
+    flag_prompt_injection,
+    record_intent,
+    record_outcome,
+    register_sensitive,
+    tool_span,
+    traced_node,
+)
 from aiplatform.usage import UsageEvent, UsageStore
 
 log = logging.getLogger(__name__)
@@ -206,6 +213,7 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
     async def wait_for_human(state: AgentState) -> dict:
         """A human handles this conversation: the message is stored, the bot stays quiet."""
         emit = emitter()
+        record_outcome("handoff")
         await emit(HumanWaiting(state["handoff"].id))
         await emit(AgentDone("handoff", "", []))
         return {}
@@ -228,6 +236,7 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
             await record(state, completed, classify_route.name)
             intent = intents.parse(completed.message)
         metrics.AGENT_INTENTS.labels(intent.name).inc()
+        record_intent(intent.name)
         if intent.name == "attack":
             # Repeating an attack is not a customer who needs a person: no advisor offer.
             intent = replace(intent, needs_tools=False, insistence=False)
@@ -246,6 +255,7 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         emit, conv = emitter(), state["conv"]
         text = attack_text(state["language"])
         await repo.append(conv, {"role": "assistant", "content": [{"type": "text", "text": text}]})
+        record_outcome("blocked", text)
         await emit(AgentText(text))
         await emit(AgentDone("blocked", text, []))
         return {}
@@ -260,6 +270,7 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
             message_index=len(conv.messages))
         text = handoff_text(state["language"])
         await repo.append(conv, {"role": "assistant", "content": [{"type": "text", "text": text}]})
+        record_outcome("handoff", text)
         await emit(AgentText(text))
         await emit(HandoffStarted(item.id))
         await emit(AgentDone("handoff", text, []))
@@ -384,6 +395,7 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
     async def finish(state: AgentState) -> dict:
         emit = emitter()
         outcome = state["outcome"]
+        record_outcome(outcome or "max_iterations", state["final_text"])
         if outcome in ("done", "refused") and await may_offer(state):
             conv = state["conv"]
             offer = await handoffs.create(

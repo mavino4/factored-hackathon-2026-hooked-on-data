@@ -1,4 +1,4 @@
-.PHONY: check lint test test-postgres smoke eval eval-banking eval-security banking-cases compare-models bank-db users users-relink run migrate docker-build lan tls langfuse-env langfuse-up langfuse-down
+.PHONY: trace-report trace-score langfuse-mcp-env check lint test test-postgres smoke eval eval-banking eval-security banking-cases compare-models bank-db users users-relink run migrate docker-build lan prod tls langfuse-env langfuse-up langfuse-down
 
 check: lint test
 
@@ -18,6 +18,15 @@ eval-banking:  # banking evals on the provider in .env / AIP_PROVIDERS (needs `m
 
 eval-security:  # manipulation attempts, shared secrets and controls through the whole assistant (needs `make bank-db`)
 	uv run python -m evals.run --dataset evals/security.jsonl
+
+trace-report:  # speed, cost and behaviour of the turns traced in Langfuse; ARGS="--since 24h --check"
+	uv run python -m evals.traces $(ARGS)
+
+trace-score:  # grade traced turns and write the grades to Langfuse; ARGS="--dry-run" or "--judge --sample 50"
+	uv run python -m evals.score_traces $(ARGS)
+
+langfuse-mcp-env:  # prints the export line .mcp.json needs: eval "$$(make -s langfuse-mcp-env)"
+	@echo "export LANGFUSE_MCP_AUTH=$$(printf '%s:%s' "$$(grep '^LANGFUSE_PUBLIC_KEY=' .env | cut -d= -f2-)" "$$(grep '^LANGFUSE_SECRET_KEY=' .env | cut -d= -f2-)" | base64 -w0)"
 
 banking-cases:  # regenerate evals/banking.jsonl from the transcripts + the bank DB
 	uv run python evals/import_transcripts.py ../data/call_transcripts
@@ -52,9 +61,12 @@ docker-build:
 
 lan: langfuse-up  # web UI over HTTPS for other devices on the LAN (password login, Claude, traced); see docker-compose.lan.yml
 	@[ -f deploy/tls/server.crt ] || ./deploy/tls/gen-cert.sh
-	docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d --build
+	AIP_RELEASE=$$(git rev-parse --short HEAD) docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d --build
 	@echo "Open https://$$(hostname -I | cut -d' ' -f1) from another device on this network"
 	@echo "First time on a device: install http://$$(hostname -I | cut -d' ' -f1):8000/ca.crt as a trusted authority"
+
+prod:  # `make lan` with AIP_ENV=production (needs AIP_TRACE_HASH_KEY in .env)
+	AIP_ENV=production $(MAKE) lan
 
 tls:  # (re)issue the LAN demo's HTTPS certificate, e.g. after this machine's IP changed
 	./deploy/tls/gen-cert.sh

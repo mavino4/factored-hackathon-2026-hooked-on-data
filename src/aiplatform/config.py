@@ -99,6 +99,9 @@ class Settings(BaseSettings):
     # Key for the user-ID hash in traces (stable pseudonyms). Required in production when
     # tracing is on; in dev an unset key gets a random one per process.
     trace_hash_key: SecretStr | None = None
+    # Version of the code that produced a trace (e.g. the git commit), so trace reports can
+    # compare before and after a change (evals/traces.py --release).
+    release: str | None = None
 
 
     @model_validator(mode="after")

@@ -80,3 +80,57 @@ questions wrapped in junk and customers sharing a PIN or CVV, which must be answ
 ordinary controls that must never be taken for attacks. Run it after any change to the
 prompts in `chat/prompts.py` or to the classifier; a false positive on a control is as much
 a regression as a missed attack.
+
+## Trace reports (Langfuse)
+
+The suites above run prepared cases. These two commands measure the **real turns already
+traced** in the self-hosted Langfuse (`make langfuse-up`), one trace per customer turn.
+
+```bash
+make trace-report                              # last 7 days
+make trace-report ARGS="--since 24h --check"   # exit 1 if a threshold in trace_slo.json breaks
+make trace-report ARGS="--release 0fc4aaa --compare evals/results/traces-<earlier>.json"
+
+make trace-score ARGS="--dry-run"              # grade turns, write nothing
+make trace-score                               # write the grades to Langfuse as scores
+make trace-score ARGS="--judge --sample 50"    # also an LLM judge (spends API credits)
+```
+
+`trace-report` (`evals/traces.py`, read-only) prints and saves to `results/traces-<UTC>.json`:
+
+| Group | What it measures |
+|---|---|
+| Latency | p50 / p95 / p99 / max of the whole turn, the classifier, each model call, the first token and each tool. Below about 100 values (`n`) the p99 is close to the max |
+| Cost | Total, per turn, per conversation, the classifier's share, tokens per turn, cache reads |
+| Intent | Share, p95 and p99 latency and mean cost of each classified intent |
+| Outcome | How turns ended: `done`, `blocked`, `handoff`, `max_iterations`, `incomplete` (no final step: an error or the customer left) |
+| Behaviour | Answered account questions that used a bank tool, iterations per turn, turns with an error or a retry |
+| Quality | Pass rate of the scores below, once written |
+
+`trace-score` (`evals/score_traces.py`) writes one boolean score per turn and check; a turn
+that already has a score is skipped, so running it again only grades new turns.
+
+| Score | Passes when |
+|---|---|
+| `language_match` | The answer is in the customer's UI language (es / pt; skipped for short answers) |
+| `no_leak` | The answer names no tool or prompt section |
+| `used_bank_tool` | An answered account question called a bank tool in that turn |
+| `helpfulness` (`--judge`) | The model judges that the answer addresses the question, or declines clearly when out of scope |
+
+The app itself adds the scores `intent`, `outcome` and `prompt_injection`, the time to first
+token and the release (`AIP_RELEASE`, set to the git commit by `make lan`) to every new trace.
+Older traces lack them: the report then reads intent and outcome from the steps.
+
+**From a trace to a regression case:**
+`make trace-report ARGS="--export-cases --failed used_bank_tool"` (or `--outcome incomplete`)
+writes the selected turns as cases to `results/cases-<UTC>.jsonl`. Their text is masked
+(`<NAME>`, `<AMOUNT>`...), so review each one and replace the placeholders before adding it to
+a suite.
+
+**Limits.** Traces are masked before they leave the app, so nothing here can check that a
+balance is right: that stays with `banking.jsonl`. This also measures existing traffic; it is
+not a load test.
+
+**Langfuse MCP (optional).** `.mcp.json` points Claude Code at the server's own MCP endpoint
+(observations, scores, metrics, datasets). It needs the project keys in the environment:
+`eval "$(make -s langfuse-mcp-env)"` before starting Claude Code.

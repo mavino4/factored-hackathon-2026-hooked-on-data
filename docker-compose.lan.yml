@@ -11,6 +11,9 @@
 services:
   app:
     environment:
+      # `make prod` sets production: Secure cookies, a fixed trace hash key required, and
+      # traces filed under Langfuse's "production" environment.
+      AIP_ENV: ${AIP_ENV:-dev}
       AIP_AUTH_MODE: password
       # HTTPS only: browsers never send the session cookie over plain HTTP.
       AIP_SESSION_COOKIE_SECURE: "true"
@@ -21,6 +24,8 @@ services:
       AIP_USER_TOKENS_PER_DAY: "200000"
       # Langfuse's web service on its own compose network (make langfuse-up).
       LANGFUSE_BASE_URL: http://langfuse-web:3000
+      # The commit being served (set by `make lan`), so trace reports can compare versions.
+      AIP_RELEASE: ${AIP_RELEASE:-}
     networks: [default, langfuse]
 
   lb:

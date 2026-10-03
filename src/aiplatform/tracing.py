@@ -29,6 +29,8 @@ log = logging.getLogger(__name__)
 
 # The Langfuse client and masker of the run in progress (set by Tracing.run).
 _active: ContextVar["Tracing | None"] = ContextVar("tracing_active", default=None)
+# The root observation of the run in progress, which gets the run's final answer.
+_root: ContextVar[Any] = ContextVar("tracing_root", default=None)
 
 
 class Tracing:
@@ -49,7 +51,7 @@ class Tracing:
         client = Langfuse(public_key=settings.langfuse_public_key,
                           secret_key=settings.langfuse_secret_key.get_secret_value(),
                           base_url=settings.langfuse_host, environment=settings.env,
-                          mask=masker.mask)
+                          release=settings.release or None, mask=masker.mask)
         log.info("Langfuse tracing on", extra={"host": settings.langfuse_host,
                                                "mask_amounts": settings.trace_mask_amounts})
         return cls(client, masker)
@@ -75,17 +77,18 @@ class Tracing:
                    if k not in ("user_id", "customer_id", "thread_id")}
         with (privacy.run_scope(),
               self._client.start_as_current_observation(
-                  as_type="agent", name=name, input=trace_input, metadata=details),
+                  as_type="agent", name=name, input=trace_input, metadata=details) as root,
               propagate_attributes(user_id=user_id, session_id=metadata["thread_id"],
                                    trace_name=name, tags=config.get("tags"))):
             # Names, last 4 digits and amounts that tools returned in earlier turns are
             # masked from the first step, not only once a tool runs again in this turn.
             self._masker.register(history)
-            token = _active.set(self)
+            token, root_token = _active.set(self), _root.set(root)
             try:
                 yield config
             finally:
                 _active.reset(token)
+                _root.reset(root_token)
 
     def flush(self) -> None:
         """Send pending traces (on shutdown)."""
@@ -163,6 +166,27 @@ def flag_prompt_injection(reason: str) -> None:
     tracing._client.update_current_span(level="WARNING", status_message=reason)
     tracing._client.score_current_trace(name="prompt_injection", value=1,
                                         data_type="BOOLEAN", comment=reason)
+
+
+def record_intent(intent: str) -> None:
+    """Score the current trace with the classified intent, to group trace metrics by it."""
+    tracing = _active.get()
+    if tracing is not None:
+        tracing._client.score_current_trace(name="intent", value=intent,
+                                            data_type="CATEGORICAL")
+
+
+def record_outcome(outcome: str, text: str | None = None) -> None:
+    """How the run ended (``done``, ``blocked``, ``handoff``...), as a score on the current
+    trace, and the answer the customer got as the trace's output (masked on the way)."""
+    tracing = _active.get()
+    if tracing is None:
+        return
+    root = _root.get()
+    if root is not None and text:
+        root.update(output=text)
+    tracing._client.score_current_trace(name="outcome", value=outcome,
+                                        data_type="CATEGORICAL")
 
 
 def run_config(name: str, *, user_id: str, conversation_id: str, trace_input: Any = None,
