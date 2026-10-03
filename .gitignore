@@ -33,6 +33,8 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+# Embedding vectors cached by evals/classify_bench.py (OpenAI text-embedding-3-small)
+evals/intents/.cache/
 .coverage
 .coverage.*
 htmlcov/

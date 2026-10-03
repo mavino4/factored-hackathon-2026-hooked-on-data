@@ -52,3 +52,45 @@ def test_a_short_follow_up_inherits_an_account_question():
     assert with_follow_up(Fixed(), "¿y la cuenta corriente?", []).intent == "general"
     after_general = [{"role": "user", "content": "hola"}]
     assert with_follow_up(Fixed(), "¿y la cuenta corriente?", after_general).intent == "general"
+
+
+# --- Jev (TypeSafe), with a mocked HTTP transport ------------------------------------------
+
+async def test_jev_asks_a_choice_question_and_reads_the_answer():
+    import json
+
+    import httpx
+
+    from aiplatform.agent.classifiers.jev import API_URL, CRITERIA, JevClassifier
+
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(429)  # rate limited: retried
+        return httpx.Response(200, json={
+            "model": "jev-1.13.0",
+            "answers": {"intent": {"type": "choice", "choice": "account", "confidence": 0.83,
+                                   "probabilities": {"account": 0.9, "general": 0.1}}},
+            "usage": {"input_tokens": 410, "output_tokens": 3}})
+
+    jev = JevClassifier("ts-test", transport=httpx.MockTransport(handler), attempts=3)
+    history = [{"role": "user", "content": "mi tarjeta"},
+               {"role": "assistant", "content": [{"type": "text", "text": "Debe <AMOUNT>."}]}]
+    try:
+        prediction, extra = await jev.classify([*history, {"role": "user", "content": "¿y la cuenta?"}])
+    finally:
+        await jev.close()
+    assert (prediction.intent, prediction.confidence) == ("account", 0.83)
+    assert extra == {"probabilities": {"account": 0.9, "general": 0.1}, "model": "jev-1.13.0",
+                     "input_tokens": 410}
+    assert len(calls) == 2 and str(calls[1].url) == API_URL
+    assert calls[1].headers["authorization"] == "Bearer ts-test"
+    body = json.loads(calls[1].content)
+    assert body["model"] == "jev-latest"
+    assert body["state"] == ("Customer: mi tarjeta\nBankBot: Debe <AMOUNT>.\n"
+                             "Customer: ¿y la cuenta?")
+    question = body["questions"]["intent"]
+    assert question["type"] == "choice" and question["criteria"] == CRITERIA
+    assert set(CRITERIA) == {"account", "general", "out_of_scope", "human", "attack"}

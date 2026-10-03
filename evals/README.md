@@ -141,15 +141,28 @@ not a load test.
 ## Intent classifiers without an LLM
 
 The LLM classifier (`agent/intent.py`) is ~45 % of the cost of a turn and ~1.5 s at p95.
-`agent/classifiers/` holds three alternatives, measured **in isolation** (not wired into
-the agent yet): keyword rules (`rules`), TF-IDF + logistic regression (`ml`) and bge-m3
-embeddings from Ollama + logistic regression or nearest neighbours (`embeddings-*`).
+`agent/classifiers/` holds the alternatives, measured **in isolation** (not wired into
+the agent yet): keyword rules (`rules`), TF-IDF + logistic regression (`ml`), and sentence
+embeddings with a classifier on top, named `<embeddings>-<model>`:
+
+| Embeddings | Where | Needs |
+|---|---|---|
+| `bge-m3` (1024 dims) | local Ollama | `ollama pull bge-m3` |
+| `openai-3s`: OpenAI text-embedding-3-small (1536 dims) | OpenAI API, $0.02 / M tokens | `OPENAI_API_KEY=sk-...` in `.env` (skipped without it); vectors cached in `intents/.cache/` (gitignored) |
+
+`jev`: Jev, TypeSafe AI's decision model, answers a typed `choice` question with a
+probability per intent and a confidence (`TYPESAFE_API_KEY` in `.env`; skipped without it;
+answers cached in `intents/jev_predictions.jsonl`, `--refresh-jev` to ask again).
+
+Models on the vectors: `logreg` (logistic regression), `knn` (nearest-neighbour vote),
+`rf` (random forest) and `boost` (scikit-learn histogram gradient boosting), each tuned by
+cross-validation on the training set only.
 
 ```bash
 ollama pull bge-m3                      # once, for the embeddings
 make intent-data                        # test set, generated training data (Qwen ~2 h)
 make classify-bench                     # all classifiers vs the LLM on the test set
-make classify-bench ARGS="--only rules ml --errors"
+make classify-bench ARGS="--only rules openai-3s-logreg --errors"
 ```
 
 | File | What it is |
@@ -162,5 +175,6 @@ make classify-bench ARGS="--only rules ml --errors"
 
 The bench reports accuracy, macro-F1, attack recall, false attacks (real requests taken for
 attacks), F1 per intent, accuracy per source, language, tag and clean vs misspelt, latency p50/p95/p99 and cost
-per 1k messages. Rules are written from the intent definitions; tune them on the
+per 1k messages, and a confidence view: for thresholds 0.5 / 0.7 / 0.9, the share of
+messages a classifier is that sure about and its accuracy on them. Rules are written from the intent definitions; tune them on the
 generated data, never on the test set's errors, or the score stops meaning anything.

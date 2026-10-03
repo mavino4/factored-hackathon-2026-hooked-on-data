@@ -68,6 +68,15 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("ANTHROPIC_API_KEY", "AIP_ANTHROPIC_API_KEY"))
 
+    # OpenAI API key, read from OPENAI_API_KEY like the Claude key above. Only the intent
+    # classifier bench uses it (text-embedding-3-small, agent/classifiers/embeddings.py).
+    openai_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_API_KEY", "AIP_OPENAI_API_KEY"))
+
+    # TypeSafe AI key, for Jev (agent/classifiers/jev.py); only the classifier bench uses it.
+    typesafe_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("TYPESAFE_API_KEY", "AIP_TYPESAFE_API_KEY"))
+
     # Amazon Bedrock (Mantle client) - only needed when "bedrock" is in `providers`.
     aws_region: str | None = None
     # Google Vertex AI - only needed when "vertex" is in `providers`.

@@ -4,8 +4,12 @@
     uv run --group classifiers python -m evals.classify_bench --only rules ml --errors
     uv run --group classifiers python -m evals.classify_bench --refresh-llm   # spends API credits
 
-``rules`` needs nothing; ``ml`` and ``embeddings-*`` are trained here on
-evals/intents/train.jsonl only (``embeddings-*`` also need Ollama with bge-m3). ``llm`` is
+``rules`` needs nothing; ``ml`` and the embedding classifiers are trained here on
+evals/intents/train.jsonl only. ``bge-m3-*`` need Ollama with bge-m3; ``openai-3s-*``
+(text-embedding-3-small) need OPENAI_API_KEY in .env and are skipped without it, and
+cache their vectors in evals/intents/.cache/. ``*-logreg|knn|rf|boost`` is the model on
+the vectors. ``jev`` is TypeSafe's decision model (TYPESAFE_API_KEY in .env), cached in
+evals/intents/jev_predictions.jsonl like the LLM. ``llm`` is
 the production classifier (agent/intent.py through the gateway, same prompt, model and
 forced tool); its predictions are cached in evals/intents/llm_predictions.jsonl, so it is
 only paid for once per test set. Results go to evals/results/classify-<UTC>.json.
@@ -33,7 +37,13 @@ from evals.intent_dataset import TEST, TRAIN, read
 
 ROOT = Path(__file__).parent
 LLM_CACHE = ROOT / "intents" / "llm_predictions.jsonl"
-ALL = ["llm", "rules", "ml", "embeddings-logreg", "embeddings-knn"]
+EMBEDDERS = ("bge-m3", "openai-3s")
+METHODS = ("logreg", "knn", "rf", "boost")
+ALL = ["llm", "jev", "rules", "ml", *(f"{e}-{m}" for e in EMBEDDERS for m in METHODS)]
+JEV_CACHE = ROOT / "intents" / "jev_predictions.jsonl"
+CACHE_DIR = ROOT / "intents" / ".cache"
+# Confidence thresholds for the coverage view: what share is answered above each, how well.
+THRESHOLDS = (0.5, 0.7, 0.9)
 
 
 def history_of(case: dict) -> list[dict]:
@@ -85,6 +95,39 @@ async def llm_predictions(cases: list[dict], refresh: bool) -> dict[str, dict]:
     return cached
 
 
+async def jev_predictions(cases: list[dict], refresh: bool, api_key: str) -> dict[str, dict]:
+    """Jev on the test set, cached like the LLM (evals/intents/jev_predictions.jsonl)."""
+    from aiplatform.agent.classifiers.jev import MODEL, JevClassifier, cost_usd
+
+    cached = {} if refresh else {r["id"]: r for r in read(JEV_CACHE)}
+    todo = [c for c in cases if c["id"] not in cached]
+    if not todo:
+        return cached
+    jev, gate = JevClassifier(api_key), asyncio.Semaphore(4)
+
+    async def one(case: dict) -> dict:
+        messages = [*history_of(case), {"role": "user", "content": case["text"]}]
+        async with gate:
+            start = time.perf_counter()
+            prediction, extra = await jev.classify(messages)
+            latency = time.perf_counter() - start
+        return {"id": case["id"], "intent": prediction.intent,
+                "confidence": prediction.confidence, "reason": prediction.reason,
+                "probabilities": extra["probabilities"], "model": extra["model"] or MODEL,
+                "latency_s": round(latency, 4), "input_tokens": extra["input_tokens"],
+                "cost_usd": cost_usd(extra["input_tokens"])}
+
+    try:
+        print(f"jev: classifying {len(todo)} messages (TypeSafe API)...")
+        rows = await asyncio.gather(*(one(c) for c in todo))
+    finally:
+        await jev.close()
+    cached.update({r["id"]: r for r in rows})
+    JEV_CACHE.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n"
+                                 for r in cached.values()))
+    return cached
+
+
 # --- Metrics ----------------------------------------------------------------------------------
 
 def percentile(values: list[float], q: float) -> float | None:
@@ -132,6 +175,23 @@ def score(cases: list[dict], predicted: dict[str, str]) -> dict:
     }
 
 
+def embedder_for(name: str, embedders: dict):
+    family = next((e for e in EMBEDDERS if name.startswith(e + "-")), None)
+    if family is None:
+        return None
+    if family not in embedders:
+        from aiplatform.agent.classifiers import embeddings
+        if family == "bge-m3":
+            embedder = embeddings.OllamaEmbedder()
+            embedder.embed(["warm up"])  # load the model before timing anything
+        else:
+            from aiplatform.config import get_settings
+            key = get_settings().openai_api_key
+            embedder = embeddings.OpenAIEmbedder(key.get_secret_value(), cache_dir=CACHE_DIR)
+        embedders[family] = embedder
+    return embedders[family]
+
+
 def build(name: str, train: list[dict], embedder):
     if name == "rules":
         return RuleClassifier()
@@ -140,7 +200,19 @@ def build(name: str, train: list[dict], embedder):
         from aiplatform.agent.classifiers.ml import TfidfClassifier
         return TfidfClassifier().fit(texts, labels)
     from aiplatform.agent.classifiers.embeddings import EmbeddingClassifier
-    return EmbeddingClassifier(embedder, method=name.split("-", 1)[1]).fit(texts, labels)
+    return EmbeddingClassifier(embedder, method=name.rsplit("-", 1)[1]).fit(texts, labels)
+
+
+def coverage(cases: list[dict], preds: dict[str, Prediction]) -> dict:
+    """For each threshold: the share of messages with confidence at or above it, and the
+    accuracy on those. The rest would go to a slower classifier (e.g. the LLM)."""
+    out = {}
+    for t in THRESHOLDS:
+        kept = [c for c in cases if preds[c["id"]].confidence >= t]
+        right = sum(preds[c["id"]].intent == c["intent"] for c in kept)
+        out[str(t)] = {"coverage": round(len(kept) / len(cases), 3),
+                       "accuracy": round(right / len(kept), 3) if kept else None}
+    return out
 
 
 def main() -> int:
@@ -148,6 +220,8 @@ def main() -> int:
     parser.add_argument("--only", nargs="+", choices=ALL, default=ALL)
     parser.add_argument("--refresh-llm", action="store_true",
                         help="classify the test set with the LLM again (API credits)")
+    parser.add_argument("--refresh-jev", action="store_true",
+                        help="classify the test set with Jev again (TypeSafe API)")
     parser.add_argument("--errors", action="store_true", help="print every wrong prediction")
     args = parser.parse_args()
 
@@ -158,18 +232,31 @@ def main() -> int:
         raise SystemExit("no training set: uv run python -m evals.intent_dataset train")
     print(f"test {len(test)} messages · train {len(train)} messages")
 
-    embedder = None
-    if any(n.startswith("embeddings") for n in args.only):
-        from aiplatform.agent.classifiers.embeddings import OllamaEmbedder
-        embedder = OllamaEmbedder()
-        embedder.embed(["warm up"])  # load the model before timing anything
+    from aiplatform.config import get_settings
+    settings, names = get_settings(), args.only
+    if any(n.startswith("openai-") for n in names) and settings.openai_api_key is None:
+        print("OPENAI_API_KEY is not set in .env: skipping the openai-3s-* classifiers")
+        names = [n for n in names if not n.startswith("openai-")]
+    if "jev" in names and settings.typesafe_api_key is None:
+        print("TYPESAFE_API_KEY is not set in .env: skipping jev")
+        names = [n for n in names if n != "jev"]
 
+    embedders: dict = {}
     results, predictions = {}, {}
-    for name in args.only:
+    for name in names:
+        embedder = embedder_for(name, embedders)
         if name == "llm":
             rows = asyncio.run(llm_predictions(test, args.refresh_llm))
             preds = {c["id"]: Prediction(rows[c["id"]]["intent"], 1.0, rows[c["id"]]["reason"])
                      for c in test}
+            latencies = [rows[c["id"]]["latency_s"] for c in test]
+            cost = sum(rows[c["id"]]["cost_usd"] for c in test)
+            train_s = 0.0
+        elif name == "jev":
+            rows = asyncio.run(jev_predictions(test, args.refresh_jev,
+                                               settings.typesafe_api_key.get_secret_value()))
+            preds = {c["id"]: Prediction(rows[c["id"]]["intent"], rows[c["id"]]["confidence"],
+                                         rows[c["id"]]["reason"]) for c in test}
             latencies = [rows[c["id"]]["latency_s"] for c in test]
             cost = sum(rows[c["id"]]["cost_usd"] for c in test)
             train_s = 0.0
@@ -178,12 +265,20 @@ def main() -> int:
             classifier = build(name, train, embedder)
             train_s = time.perf_counter() - start
             if embedder is not None:
-                embedder.clear()  # time real embeddings, not ones another classifier cached
+                # Time real embedding calls, not vectors cached by training or another run.
+                embedder.clear()
+                embedder.read_disk = False
+                tokens_before = getattr(embedder, "tokens", 0)
             preds, latencies, cost = {}, [], 0.0
             for case in test:
                 t0 = time.perf_counter()
                 preds[case["id"]] = with_follow_up(classifier, case["text"], history_of(case))
                 latencies.append(time.perf_counter() - t0)
+            if embedder is not None:
+                embedder.read_disk = True
+                if name.startswith("openai-"):
+                    from aiplatform.agent.classifiers.embeddings import OPENAI_EMBED_USD_PER_MTOK
+                    cost = (embedder.tokens - tokens_before) * OPENAI_EMBED_USD_PER_MTOK / 1e6
         result = score(test, {k: p.intent for k, p in preds.items()})
         result["latency_ms"] = {q: round(1000 * percentile(latencies, v), 2)
                                 for q, v in (("p50", 0.5), ("p95", 0.95), ("p99", 0.99))}
@@ -195,19 +290,28 @@ def main() -> int:
                 slices[key].append(c)
         result["slices"] = {k: score(v, {c["id"]: preds[c["id"]].intent for c in v})["accuracy"]
                             for k, v in sorted(slices.items())}
+        if name != "llm":  # the LLM gives no probability
+            result["coverage"] = coverage(test, preds)
         results[name], predictions[name] = result, preds
 
     print(f"\n{'classifier':<19}{'acc':>6}{'macroF1':>9}{'attack R':>10}{'false atk':>11}"
-          f"{'p50 ms':>9}{'p95 ms':>9}{'p99 ms':>9}{'$/1k':>8}")
+          f"{'p50 ms':>9}{'p95 ms':>9}{'p99 ms':>9}{'$/1k':>9}")
     for name, r in results.items():
         lat = r["latency_ms"]
         print(f"{name:<19}{r['accuracy']:>6.3f}{r['macro_f1']:>9.3f}{r['attack_recall']:>10.3f}"
               f"{r['false_attack_rate']:>11.3f}{lat['p50']:>9.2f}{lat['p95']:>9.2f}"
-              f"{lat['p99']:>9.2f}{r['cost_usd_per_1k']:>8.3f}")
+              f"{lat['p99']:>9.2f}{r['cost_usd_per_1k']:>9.4f}")
     print("\nF1 per intent")
     print(f"{'classifier':<19}" + "".join(f"{i:>14}" for i in INTENTS))
     for name, r in results.items():
         print(f"{name:<19}" + "".join(f"{r['per_class'][i]['f1']:>14.3f}" for i in INTENTS))
+    print("\nConfidence: share of messages at or above the threshold · accuracy on them")
+    print(f"{'classifier':<19}" + "".join(f"{'>= ' + str(t):>18}" for t in THRESHOLDS))
+    for name, r in results.items():
+        if "coverage" in r:
+            print(f"{name:<19}" + "".join(
+                f"{v['coverage']:>9.1%} · {(v['accuracy'] or 0):>6.1%}"
+                for v in r["coverage"].values()))
     keys = sorted({k for r in results.values() for k in r["slices"]})
     for group in ("style", "source", "lang", "tag"):
         group_keys = [k for k in keys if k.startswith(group + ":")]
