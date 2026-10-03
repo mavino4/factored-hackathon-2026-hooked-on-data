@@ -68,15 +68,19 @@ DROP POLICY IF EXISTS own_login ON bank.customer_logins;
 CREATE POLICY own_login ON bank.customer_logins FOR SELECT
     USING (subject = current_setting('app.subject', true));
 
+-- A scalar subquery (`=`, not `IN`): a subject links to at most one customer (it is the
+-- primary key), and Postgres evaluates it once and uses ix_products_customer. With `IN`
+-- it scanned all 400k products on every query (seconds when the cache is cold). No
+-- linked customer: the subquery is NULL and no row matches.
 DROP POLICY IF EXISTS own_customer ON bank.customers;
 CREATE POLICY own_customer ON bank.customers FOR SELECT
-    USING (customer_id IN (SELECT l.customer_id FROM bank.customer_logins l
-                           WHERE l.subject = current_setting('app.subject', true)));
+    USING (customer_id = (SELECT l.customer_id FROM bank.customer_logins l
+                          WHERE l.subject = current_setting('app.subject', true)));
 
 DROP POLICY IF EXISTS own_products ON bank.products;
 CREATE POLICY own_products ON bank.products FOR SELECT
-    USING (customer_id IN (SELECT l.customer_id FROM bank.customer_logins l
-                           WHERE l.subject = current_setting('app.subject', true)));
+    USING (customer_id = (SELECT l.customer_id FROM bank.customer_logins l
+                          WHERE l.subject = current_setting('app.subject', true)));
 
 -- Read-only application role (created by the loader with its password).
 GRANT USAGE ON SCHEMA bank TO bank_reader;

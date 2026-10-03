@@ -163,7 +163,8 @@ cross-validation on the training set only.
 ```bash
 ollama pull bge-m3                      # once, for the embeddings
 make intent-data                        # test set, generated training data (Qwen ~2 h)
-make classify-bench                     # all classifiers vs the LLM on the test set
+make classify-bench                     # the classifiers vs the LLM (~40 s with the caches)
+make classify-bench ARGS="--only bge-m3-rf openai-3s-boost"  # rf / boost: minutes each, not by default
 make classify-bench ARGS="--only rules openai-3s-logreg --errors"
 ```
 

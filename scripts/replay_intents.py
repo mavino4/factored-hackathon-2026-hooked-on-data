@@ -2,6 +2,7 @@
 bank tools) with Langfuse tracing on, once per classifier mode, to compare them in traces.
 
     uv run python scripts/replay_intents.py --limit 80               # llm and jev_llm
+    uv run python scripts/replay_intents.py --concurrency 1          # one conversation at a time
     uv run python scripts/replay_intents.py --modes jev_llm --limit 20
 
 Each mode runs in its own process (the Langfuse client is a per-process singleton) and its
@@ -60,7 +61,8 @@ def sample(limit: int, seed: int) -> list[dict]:
     return chosen[:limit]
 
 
-async def replay(mode: str, cases: list[dict], release: str, user: str) -> Counter:
+async def replay(mode: str, cases: list[dict], release: str, user: str,
+                 concurrency: int) -> Counter:
     settings = get_settings().model_copy(update={
         "intent_classifier": mode, "release": release, "langfuse_enabled": True})
     tracing = Tracing.from_settings(settings)
@@ -77,16 +79,24 @@ async def replay(mode: str, cases: list[dict], release: str, user: str) -> Count
                          make_bank_tools(bank), tracing=tracing, jev=jev,
                          jev_threshold=settings.jev_threshold)
     outcomes: Counter = Counter()
-    try:
-        for i, case in enumerate(cases, 1):
+    gate, done = asyncio.Semaphore(concurrency), 0
+
+    async def one(case: dict) -> None:
+        # Each case is its own conversation (and its own traced runs), so they can overlap.
+        nonlocal done
+        async with gate:
             conv = await repo.create(user, "agent")
             earlier = [m["content"] for m in case.get("history") or [] if m["role"] == "user"]
             for text in [*earlier, case["text"]]:
                 async for event in runner.run(user, conv.id, text, case.get("language")):
                     if isinstance(event, AgentDone) and text == case["text"]:
                         outcomes[event.outcome] += 1
-            if i % 10 == 0:
-                print(f"  {mode}: {i}/{len(cases)}", flush=True)
+            done += 1
+            if done % 10 == 0:
+                print(f"  {mode}: {done}/{len(cases)}", flush=True)
+
+    try:
+        await asyncio.gather(*(one(c) for c in cases))
     finally:
         tracing.flush()
         await close_clients(clients)
@@ -103,6 +113,8 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=80)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--user", default="eval-es", help="a user linked in the bank DB")
+    parser.add_argument("--concurrency", type=int, default=6,
+                        help="conversations in flight at once (1: one after another)")
     parser.add_argument("--tag", default="", help="suffix for the release, e.g. --tag=-r2")
     args = parser.parse_args()
 
@@ -111,7 +123,8 @@ def main() -> int:
         # is fixed when it starts, and flushing shuts it down), so modes must not share one.
         for mode in args.modes:
             command = [sys.executable, __file__, "--modes", mode, "--limit", str(args.limit),
-                       "--seed", str(args.seed), "--user", args.user, f"--tag={args.tag}"]
+                       "--seed", str(args.seed), "--user", args.user, f"--tag={args.tag}",
+                       "--concurrency", str(args.concurrency)]
             subprocess.run(command, check=True)
         return 0
     sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
@@ -121,7 +134,7 @@ def main() -> int:
     print(f"{mode}: {len(cases)} cases {dict(Counter(c['intent'] for c in cases))}")
     release = f"{sha}-replay{args.tag}-{mode}"
     start = time.perf_counter()
-    outcomes = asyncio.run(replay(mode, cases, release, args.user))
+    outcomes = asyncio.run(replay(mode, cases, release, args.user, args.concurrency))
     print(f"{mode}: {dict(outcomes)} in {time.perf_counter() - start:.0f} s (release {release})")
     return 0
 

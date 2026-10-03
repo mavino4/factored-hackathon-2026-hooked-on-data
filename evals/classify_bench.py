@@ -42,6 +42,9 @@ LLM_CACHE = ROOT / "intents" / "llm_predictions.jsonl"
 EMBEDDERS = ("bge-m3", "openai-3s")
 METHODS = ("logreg", "knn", "rf", "boost")
 ALL = ["llm", "jev", "rules", "ml", *(f"{e}-{m}" for e in EMBEDDERS for m in METHODS)]
+# What runs without --only: random forest and boosting are left out (minutes of
+# cross-validated training each, and the weakest models on these embeddings).
+DEFAULT = [n for n in ALL if not n.endswith(("-rf", "-boost"))]
 JEV_CACHE = ROOT / "intents" / "jev_predictions.jsonl"
 CACHE_DIR = ROOT / "intents" / ".cache"
 # Confidence thresholds for the coverage view: what share is answered above each, how well.
@@ -228,7 +231,8 @@ def coverage(cases: list[dict], preds: dict[str, Prediction]) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compare intent classifiers on the test set.")
-    parser.add_argument("--only", nargs="+", choices=ALL, default=ALL)
+    parser.add_argument("--only", nargs="+", choices=ALL, default=DEFAULT,
+                        help="classifiers to run (default: all but *-rf and *-boost)")
     parser.add_argument("--refresh-llm", action="store_true",
                         help="classify the test set with the LLM again (API credits)")
     parser.add_argument("--refresh-jev", action="store_true",
