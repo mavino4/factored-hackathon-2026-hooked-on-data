@@ -97,6 +97,14 @@ def percentile(values: list[float], q: float) -> float | None:
     return ordered[low] + (ordered[high] - ordered[low]) * (pos - low)
 
 
+def slice_keys(case: dict) -> list[str]:
+    tags = case.get("tags") or []
+    # Clean vs misspelt: the typos copies plus the cases written with typos.
+    misspelt = case["source"] == "typos" or "typos" in tags
+    return [f"source:{case['source']}", f"lang:{case['language']}",
+            "style:" + ("typos" if misspelt else "clean"), *(f"tag:{t}" for t in tags)]
+
+
 def score(cases: list[dict], predicted: dict[str, str]) -> dict:
     gold = [c["intent"] for c in cases]
     pred = [predicted[c["id"]] for c in cases]
@@ -183,8 +191,8 @@ def main() -> int:
         result["train_s"] = round(train_s, 1)
         slices = defaultdict(list)
         for c in test:
-            slices[f"source:{c['source']}"].append(c)
-            slices[f"lang:{c['language']}"].append(c)
+            for key in slice_keys(c):
+                slices[key].append(c)
         result["slices"] = {k: score(v, {c["id"]: preds[c["id"]].intent for c in v})["accuracy"]
                             for k, v in sorted(slices.items())}
         results[name], predictions[name] = result, preds
@@ -200,11 +208,15 @@ def main() -> int:
     print(f"{'classifier':<19}" + "".join(f"{i:>14}" for i in INTENTS))
     for name, r in results.items():
         print(f"{name:<19}" + "".join(f"{r['per_class'][i]['f1']:>14.3f}" for i in INTENTS))
-    print("\nAccuracy per slice")
     keys = sorted({k for r in results.values() for k in r["slices"]})
-    print(f"{'classifier':<19}" + "".join(f"{k.split(':')[1]:>13}" for k in keys))
-    for name, r in results.items():
-        print(f"{name:<19}" + "".join(f"{r['slices'][k]:>13.3f}" for k in keys))
+    for group in ("style", "source", "lang", "tag"):
+        group_keys = [k for k in keys if k.startswith(group + ":")]
+        sizes = {k: sum(1 for c in test if k in slice_keys(c)) for k in group_keys}
+        print(f"\nAccuracy per {group} (n)")
+        print(f"{'classifier':<19}" + "".join(
+            f"{k.split(':')[1][:9] + f'({sizes[k]})':>14}" for k in group_keys))
+        for name, r in results.items():
+            print(f"{name:<19}" + "".join(f"{r['slices'][k]:>14.3f}" for k in group_keys))
 
     if args.errors:
         for name, preds in predictions.items():

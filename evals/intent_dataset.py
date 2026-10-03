@@ -19,8 +19,11 @@ import re
 import sys
 import unicodedata
 from pathlib import Path
+from random import Random
 
 import httpx
+
+from evals.intents.typos import add_typos
 
 ROOT = Path(__file__).parent
 DIR = ROOT / "intents"
@@ -132,8 +135,13 @@ def build_test() -> list[dict]:
                          "language": case.get("language", case_id[:2] if case_id[:3] in (
                              "es-", "pt-") else "es"),
                          "source": suite})
-    for case in read(DIR / "handwritten.jsonl"):
-        rows.append({"history": [], **case, "source": "handwritten"})
+    for name in ("handwritten", "handwritten2"):
+        for case in read(DIR / f"{name}.jsonl"):
+            rows.append({"history": [], "tags": [], **case, "source": name})
+    # The same messages misspelt (seeded per id, so the set is stable): robustness.
+    rows += [{**r, "id": f"{r['id']}-typo", "text": add_typos(r["text"], Random(r["id"])),
+              "source": "typos", "original": r["id"]}
+             for r in rows if "typos" not in r.get("tags", [])]
     ids = [r["id"] for r in rows]
     assert len(ids) == len(set(ids)), "duplicate ids"
     return rows
@@ -184,10 +192,24 @@ def generate_claude(client, text: str) -> list[str]:
 # (Qwen on the local GTX 1060 writes ~6 tokens/s: ~300 messages take about 2 hours.)
 PER_LANGUAGE = {"qwen": {"es": 30, "pt": 18, "en": 12}, "claude": {"es": 10, "pt": 6, "en": 4}}
 
+# Round 2: how people really type, for every intent (generated-<source>-r2.jsonl).
+STYLE_ANGLES = [
+    ("full of typing mistakes: missing or swapped letters, no accents, phone autocorrect "
+     "errors, chat abbreviations (q, xq, pq, vc, pls)"),
+    "regional slang (Mexico, Argentina, Colombia, Chile for Spanish; Brazil for Portuguese)",
+    "mixing two languages in one message (Spanglish, Portuñol, English words)",
+    "with emojis, or all in capital letters, or with lots of exclamation marks",
+    "dictated by voice: no punctuation, run-on, filler words (oye, mira, então, like)",
+    "long and rambling, with a personal story before the actual request",
+    "extremely short: one to three words, maybe misspelt",
+]
+PER_LANGUAGE_R2 = {"qwen": {"es": 12, "pt": 8, "en": 5}, "claude": {"es": 6, "pt": 4, "en": 2}}
 
-def generate(source: str, seed: int) -> None:
-    rng = random.Random(seed)
-    out = DIR / f"generated-{source}.jsonl"
+
+def generate(source: str, seed: int, round_: int = 1) -> None:
+    rng = random.Random(seed + round_)
+    out = DIR / (f"generated-{source}.jsonl" if round_ == 1 else f"generated-{source}-r2.jsonl")
+    per_language = PER_LANGUAGE if round_ == 1 else PER_LANGUAGE_R2
     rows = read(out)
     done = {(r["intent"], r["language"]) for r in rows}
     client = None
@@ -198,10 +220,10 @@ def generate(source: str, seed: int) -> None:
         key = get_settings().anthropic_api_key
         client = anthropic.Anthropic(api_key=key.get_secret_value() if key else None)
     for intent in INTENTS:
-        for language, total in PER_LANGUAGE[source].items():
+        for language, total in per_language[source].items():
             if (intent, language) in done:  # resumable: one batch per pair
                 continue
-            angles = SPEC[intent][1][:]
+            angles = (SPEC[intent][1] if round_ == 1 else STYLE_ANGLES)[:]
             rng.shuffle(angles)
             per_angle = max(2, round(total / len(angles)))
             batch: list[str] = []
@@ -218,7 +240,8 @@ def generate(source: str, seed: int) -> None:
                 batch += [{"text": m.strip(), "angle": angle} for m in messages
                           if isinstance(m, str) and 2 <= len(m.strip()) <= 600]
             for i, item in enumerate(batch[:total]):
-                rows.append({"id": f"{source}-{intent}-{language}-{i:03d}", "text": item["text"],
+                prefix = source if round_ == 1 else f"{source}-r2"
+                rows.append({"id": f"{prefix}-{intent}-{language}-{i:03d}", "text": item["text"],
                              "history": [], "intent": intent, "language": language,
                              "source": source, "angle": item["angle"]})
             write(out, rows)
@@ -241,14 +264,18 @@ def build_train() -> list[dict]:
     import numpy as np
 
     test = read(TEST)
+    files = [DIR / f"generated-{s}{r}.jsonl" for r in ("", "-r2") for s in ("qwen", "claude")]
+    generated = [r for f in files for r in read(f)]
+    # One misspelt copy of each generated message (seeded): typos the models learn from.
+    generated += [{**r, "id": f"{r['id']}-typo", "text": add_typos(r["text"], Random(r["id"])),
+                   "source": f"{r['source']}+typos"} for r in list(generated)]
     rows, seen = [], {normalized(r["text"]) for r in test}
-    for source in ("qwen", "claude"):
-        for r in read(DIR / f"generated-{source}.jsonl"):
-            key = normalized(r["text"])
-            if key and key not in seen:
-                seen.add(key)
-                rows.append(r)
-    exact = sum(len(read(DIR / f"generated-{s}.jsonl")) for s in ("qwen", "claude")) - len(rows)
+    for r in generated:
+        key = normalized(r["text"])
+        if key and key not in seen:
+            seen.add(key)
+            rows.append(r)
+    exact = len(generated) - len(rows)
 
     def unit(vectors):
         m = np.array(vectors, dtype=np.float32)
@@ -264,12 +291,14 @@ def main() -> int:
     parser.add_argument("step", choices=["test", "generate", "train"])
     parser.add_argument("--source", choices=["qwen", "claude"], default="qwen")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--round", type=int, choices=[1, 2], default=1,
+                        help="1: angles per intent; 2: typing styles (typos, slang, voice...)")
     args = parser.parse_args()
     if args.step == "test":
         rows = build_test()
         write(TEST, rows)
     elif args.step == "generate":
-        generate(args.source, args.seed)
+        generate(args.source, args.seed, args.round)
         return 0
     else:
         rows = build_train()

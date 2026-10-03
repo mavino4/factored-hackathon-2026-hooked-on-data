@@ -154,12 +154,13 @@ make classify-bench ARGS="--only rules ml --errors"
 
 | File | What it is |
 |---|---|
-| `intents/test.jsonl` | Frozen test set: the eval suites labelled by hand (`intents/labels.py`) plus `intents/handwritten.jsonl`. Never trained on |
+| `intents/test.jsonl` | Frozen test set: the eval suites labelled by hand (`intents/labels.py`), `intents/handwritten.jsonl` and `intents/handwritten2.jsonl` (typos, slang, mixed languages, emojis, capitals, voice, long messages), plus a misspelt copy of each (`intents/typos.py`, source `typos`). Never trained on |
 | `intents/generated-{qwen,claude}.jsonl` | Generated messages per intent, language and angle (Qwen 2.5 7B locally, a smaller group with Claude) |
-| `intents/train.jsonl` | The generated messages minus anything equal or too close (bge-m3 cosine ≥ 0.92) to a test message |
+| `intents/generated-{qwen,claude}-r2.jsonl` | Round 2 (`--round 2`): the same intents written the way people type (typos, slang, voice, emojis...) |
+| `intents/train.jsonl` | All generated messages plus a misspelt copy of each, minus anything equal or too close (bge-m3 cosine ≥ 0.92) to a test message |
 | `intents/llm_predictions.jsonl` | The production LLM classifier's answers on the test set (cached: it costs API credits) |
 
 The bench reports accuracy, macro-F1, attack recall, false attacks (real requests taken for
-attacks), F1 per intent, accuracy per source and language, latency p50/p95/p99 and cost
+attacks), F1 per intent, accuracy per source, language, tag and clean vs misspelt, latency p50/p95/p99 and cost
 per 1k messages. Rules are written from the intent definitions; tune them on the
 generated data, never on the test set's errors, or the score stops meaning anything.
