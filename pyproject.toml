@@ -24,6 +24,10 @@ requires = ["uv_build>=0.12.19,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+classifiers = [
+    "numpy>=2.5.3",
+    "scikit-learn>=1.9.1",
+]
 dev = [
     "aiosqlite>=0.22.1",
     "httpx>=0.28.1",

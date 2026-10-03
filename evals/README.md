@@ -137,3 +137,29 @@ not a load test.
 **Langfuse MCP (optional).** `.mcp.json` points Claude Code at the server's own MCP endpoint
 (observations, scores, metrics, datasets). It needs the project keys in the environment:
 `eval "$(make -s langfuse-mcp-env)"` before starting Claude Code.
+
+## Intent classifiers without an LLM
+
+The LLM classifier (`agent/intent.py`) is ~45 % of the cost of a turn and ~1.5 s at p95.
+`agent/classifiers/` holds three alternatives, measured **in isolation** (not wired into
+the agent yet): keyword rules (`rules`), TF-IDF + logistic regression (`ml`) and bge-m3
+embeddings from Ollama + logistic regression or nearest neighbours (`embeddings-*`).
+
+```bash
+ollama pull bge-m3                      # once, for the embeddings
+make intent-data                        # test set, generated training data (Qwen ~2 h)
+make classify-bench                     # all classifiers vs the LLM on the test set
+make classify-bench ARGS="--only rules ml --errors"
+```
+
+| File | What it is |
+|---|---|
+| `intents/test.jsonl` | Frozen test set: the eval suites labelled by hand (`intents/labels.py`) plus `intents/handwritten.jsonl`. Never trained on |
+| `intents/generated-{qwen,claude}.jsonl` | Generated messages per intent, language and angle (Qwen 2.5 7B locally, a smaller group with Claude) |
+| `intents/train.jsonl` | The generated messages minus anything equal or too close (bge-m3 cosine ≥ 0.92) to a test message |
+| `intents/llm_predictions.jsonl` | The production LLM classifier's answers on the test set (cached: it costs API credits) |
+
+The bench reports accuracy, macro-F1, attack recall, false attacks (real requests taken for
+attacks), F1 per intent, accuracy per source and language, latency p50/p95/p99 and cost
+per 1k messages. Rules are written from the intent definitions; tune them on the
+generated data, never on the test set's errors, or the score stops meaning anything.

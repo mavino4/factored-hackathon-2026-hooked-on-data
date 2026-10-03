@@ -1,4 +1,4 @@
-.PHONY: trace-report trace-score langfuse-mcp-env check lint test test-postgres smoke eval eval-banking eval-security banking-cases compare-models bank-db users users-relink run migrate docker-build lan prod tls langfuse-env langfuse-up langfuse-down
+.PHONY: intent-data classify-bench trace-report trace-score langfuse-mcp-env check lint test test-postgres smoke eval eval-banking eval-security banking-cases compare-models bank-db users users-relink run migrate docker-build lan prod tls langfuse-env langfuse-up langfuse-down
 
 check: lint test
 
@@ -21,6 +21,15 @@ eval-security:  # manipulation attempts, shared secrets and controls through the
 
 trace-report:  # speed, cost and behaviour of the turns traced in Langfuse; ARGS="--since 24h --check"
 	uv run python -m evals.traces $(ARGS)
+
+intent-data:  # test set from the suites + handwritten; train from Qwen (local) and Claude; see evals/README.md
+	uv run --group classifiers python -m evals.intent_dataset test
+	uv run --group classifiers python -m evals.intent_dataset generate --source qwen
+	uv run --group classifiers python -m evals.intent_dataset generate --source claude
+	uv run --group classifiers python -m evals.intent_dataset train
+
+classify-bench:  # non-LLM intent classifiers vs the LLM on the test set; ARGS="--only rules ml --errors"
+	uv run --group classifiers python -m evals.classify_bench $(ARGS)
 
 trace-score:  # grade traced turns and write the grades to Langfuse; ARGS="--dry-run" or "--judge --sample 50"
 	uv run python -m evals.score_traces $(ARGS)
