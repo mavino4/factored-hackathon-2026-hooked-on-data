@@ -152,7 +152,7 @@ def build_turns(observations: list[dict], scores: list[dict] = ()) -> list[Turn]
                 output = obs.get("output")
                 if isinstance(output, dict) and output.get("final_text") and not turn.answer:
                     turn.answer = output["final_text"]
-            elif name == "quick_intent":
+            elif name in ("quick_intent", "quick_answer"):
                 turn.intent = "account"
             elif name == "classify" and isinstance(obs.get("output"), dict):
                 turn.intent = (obs["output"].get("intent") or {}).get("name")

@@ -106,7 +106,8 @@ class AgentRunner:
         routing = self._quick_mode if quick_action is not None else "model"
         state = initial_state(user_id, conv, reply_language(language), decision,
                               language=language, handoff=handoff,
-                              quick=quick_action if routing != "model" else None)
+                              quick=quick_action if routing != "model" else None,
+                              quick_direct=routing == "direct")
         config = {**self._config, **run_config(
             "agent", user_id=user_id, conversation_id=conv.id, customer_id=customer_id,
             language=language,

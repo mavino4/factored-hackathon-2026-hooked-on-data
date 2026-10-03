@@ -2,7 +2,9 @@
 tools), or hand the conversation to a human.
 
     START ─┬─ open handoff ──> wait_for_human ──> END      (a human answers, not the bot)
-           ├─ quick action ──> quick_intent ────┐   (AIP_QUICK_ACTIONS=intent: no classifier)
+           ├─ quick action ──> quick_answer ──> END   (AIP_QUICK_ACTIONS=direct: no model)
+           │                       └ no answer ─┐
+           ├─ quick action ──> quick_intent ────┤   (AIP_QUICK_ACTIONS=intent: no classifier)
            ├─ decision ──────> apply_decision ──┤
            └─ new message ───> classify ─┬─ human ──> handoff ──> END
                                          ├─ attack ─> refuse_attack ──> END   (fixed reply)
@@ -32,6 +34,7 @@ from langgraph.graph import END, START, StateGraph
 
 from aiplatform import metrics
 from aiplatform.agent import intent as intents
+from aiplatform.agent import quick
 from aiplatform.agent.actions import ActionStore, PendingAction
 from aiplatform.agent.events import (
     AgentDone,
@@ -97,6 +100,9 @@ ATTACK_TEXT = {
 # from the bank, not from anything the customer typed.
 REQUIRE_TOOL = {"type": "any"}
 
+# The bank tool a direct quick answer reads (banking/tools.py).
+QUICK_TOOL = "get_products"
+
 # How the app's own note about an approval decision starts (stored with author "system").
 APPROVAL_MARK = "[Approval]"
 
@@ -142,6 +148,7 @@ class AgentState(TypedDict):
     handoff: Handoff | None  # the conversation's latest handoff when the run started
     intent: intents.Intent | None  # set by classify
     quick: QuickAction | None  # a trusted quick action that skips the classifier
+    quick_direct: bool  # answer it with a fixed text, without the model
     use_tools: bool  # send the tool definitions to the model
     iterations: int  # model calls so far
     tool_calls: list[str]
@@ -154,9 +161,10 @@ class AgentState(TypedDict):
 def initial_state(user_id: str, conv: Conversation, suffix: str | None,
                   decision: Decision | None = None, *, language: str | None = None,
                   handoff: Handoff | None = None,
-                  quick: QuickAction | None = None) -> AgentState:
+                  quick: QuickAction | None = None, quick_direct: bool = False) -> AgentState:
     return AgentState(user_id=user_id, conv=conv, suffix=suffix, language=language,
                       decision=decision, handoff=handoff, intent=None, quick=quick,
+                      quick_direct=quick_direct,
                       # An approval resumes a tool loop, which needs its tools.
                       use_tools=decision is not None,
                       iterations=0, tool_calls=[], pending=False, tool_uses=[],
@@ -263,6 +271,34 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
         metrics.AGENT_INTENTS.labels(intent.name).inc()
         record_intent(intent.name)
         return {"intent": intent, "use_tools": True}
+
+    @traced_node("quick_answer", lambda s: {"quick_action": s["quick"].key})
+    async def quick_answer(state: AgentState) -> dict:
+        """A quick action answered from the bank's data with a fixed text: no model call.
+        Without the bank tool, or if it fails, the model answers instead (quick_intent)."""
+        emit, conv, action = emitter(), state["conv"], state["quick"]
+        tool = tools.get(QUICK_TOOL)
+        if tool is None:
+            return {}
+        args = {"product_type": action.product_type} if action.product_type else {}
+        tool_use_id = f"quick_{conv.id}_{len(conv.messages)}"
+        await emit(ToolCall(tool_use_id, tool.name, args))
+        output, is_error = await invoke_tool(tool, args, ToolContext(state["user_id"], conv.id))
+        await emit(ToolResult(tool_use_id, tool.name, is_error, output))
+        try:
+            result = None if is_error else json.loads(output)
+        except ValueError:  # e.g. cut at MAX_TOOL_RESULT_CHARS
+            result = None
+        if result is None:
+            log.warning("quick answer failed; the model answers",
+                        extra={"conversation_id": conv.id, "quick_action": action.key})
+            return {"tool_calls": [tool.name]}
+        metrics.AGENT_INTENTS.labels("account").inc()
+        record_intent("account")
+        text = quick.render(action, result, state["language"])
+        await repo.append(conv, {"role": "assistant", "content": [{"type": "text", "text": text}]})
+        await emit(AgentText(text))
+        return {"outcome": "done", "final_text": text, "tool_calls": [tool.name]}
 
     @traced_node("refuse_attack", lambda s: {"reason": s["intent"].reason})
     async def refuse_attack(state: AgentState) -> dict:
@@ -429,7 +465,12 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
             return "wait_for_human"
         if state["decision"]:
             return "apply_decision"
-        return "quick_intent" if state["quick"] else "classify"
+        if state["quick"]:
+            return "quick_answer" if state["quick_direct"] else "quick_intent"
+        return "classify"
+
+    def after_quick_answer(state: AgentState) -> str:
+        return "finish" if state["outcome"] else "quick_intent"
 
     def after_classify(state: AgentState) -> str:
         return {"human": "handoff", "attack": "refuse_attack"}.get(
@@ -449,6 +490,7 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
     graph.add_node("wait_for_human", wait_for_human)
     graph.add_node("classify", classify)
     graph.add_node("quick_intent", quick_intent)
+    graph.add_node("quick_answer", quick_answer)
     graph.add_node("handoff", handoff)
     graph.add_node("refuse_attack", refuse_attack)
     graph.add_node("apply_decision", apply_decision)
@@ -456,8 +498,9 @@ def build_agent_graph(*, gateway: AIGateway, repo: ConversationRepository, usage
     graph.add_node("run_tools", run_tools)
     graph.add_node("finish", finish)
     graph.add_conditional_edges(START, start, ["wait_for_human", "apply_decision",
-                                               "quick_intent", "classify"])
+                                               "quick_answer", "quick_intent", "classify"])
     graph.add_edge("wait_for_human", END)
+    graph.add_conditional_edges("quick_answer", after_quick_answer, ["finish", "quick_intent"])
     graph.add_edge("quick_intent", "call_model")
     graph.add_conditional_edges("classify", after_classify,
                                 ["handoff", "refuse_attack", "call_model"])

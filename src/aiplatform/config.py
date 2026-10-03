@@ -41,8 +41,9 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = False
 
     # The UI's quick actions ("Frequent questions", agent/quick.py). "model": classified like
-    # any message; "intent": the button gives the intent (no classifier), the model answers.
-    quick_actions: Literal["model", "intent"] = "model"
+    # any message; "intent": the button gives the intent (no classifier), the model answers;
+    # "direct": no model at all, a fixed text filled with the customer's products.
+    quick_actions: Literal["model", "intent", "direct"] = "model"
 
     # User IDs (token `sub`, username, or X-User-Id in dev mode) allowed to read /v1/admin/*.
     admin_users: list[str] = []
