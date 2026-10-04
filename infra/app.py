@@ -1,3 +1,4 @@
+import os
 from aws_cdk import (
     Stack,
     aws_ec2 as ec2,
@@ -54,3 +55,19 @@ class BackendStack(Stack):
             "systemctl start docker",
             "usermod -a -G docker ec2-user",
         )
+
+
+if __name__ == "__main__":
+    import aws_cdk as cdk
+    
+    app = cdk.App()
+    BackendStack(
+        app,
+        "BackendStack",
+        env=cdk.Environment(
+            account=os.getenv("CDK_DEFAULT_ACCOUNT"),
+            region=os.getenv("CDK_DEFAULT_REGION"),
+        ),
+    )
+
+    app.synth()
