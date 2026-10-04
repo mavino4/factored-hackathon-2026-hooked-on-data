@@ -11,6 +11,8 @@
 
 **v1 as built:** [interactive diagram](bankbot-architecture.html) (open locally in a browser; each box lists its source lines at commit `5d18d49`): password sign-in over HTTPS, one agent that classifies each message first (and refuses manipulation attempts), human handoff, and self-hosted Langfuse tracing with PII masking. Spec: [`bankbot-architecture.json`](bankbot-architecture.json), generated with [Archify](https://github.com/tt-a1i/archify).
 
+**Branches in progress** (trace metrics, quick actions, Jev intent classifier, voice): one diagram per branch on a shared layout, with comparison views, in [`branches/`](branches/README.md).
+
 ![BankBot v1 architecture: password sign-in, unified agent, human handoff and masked tracing](bankbot-architecture.png)
 
 ---
