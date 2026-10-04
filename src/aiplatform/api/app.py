@@ -1,6 +1,7 @@
 """HTTP API: conversations, streamed chat turns (SSE) and agent runs."""
 
 import asyncio
+import base64
 import json
 import logging
 import re
@@ -67,6 +68,8 @@ from aiplatform.storage.sql import (
 )
 from aiplatform.tracing import Tracing
 from aiplatform.usage import InMemoryUsageStore, TokenQuota
+from aiplatform.voice.speech import AUDIO_TYPES, SpeechClient, base_type
+from aiplatform.voice.turn import SpokenAudio, Transcribed, VoiceProblem, voice_turn
 
 log = logging.getLogger(__name__)
 
@@ -132,8 +135,14 @@ class PasswordChange(BaseModel):
 def create_app(settings: Settings | None = None, gateway: AIGateway | None = None,
                tools: list[Tool] | None = None,
                verifier: OIDCVerifier | None = None,
-               bank_repo: BankRepository | None = None) -> FastAPI:
+               bank_repo: BankRepository | None = None,
+               speech: SpeechClient | None = None) -> FastAPI:
     settings = settings or get_settings()
+    # The voice channel needs the setting and OpenAI (or a speech client given, in tests).
+    voice_on = settings.voice_enabled and (
+        speech is not None or settings.openai_api_key is not None)
+    if settings.voice_enabled and not voice_on:
+        log.warning("AIP_VOICE_ENABLED without OPENAI_API_KEY: voice is off")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -186,8 +195,17 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
                                       handoffs=handoffs, tracing=tracing,
                                       quick_mode=settings.quick_actions,
                                       jev=jev, jev_threshold=settings.jev_threshold)
+        app.state.tracing = tracing
+        speech_client = speech
+        if voice_on and speech_client is None:
+            speech_client = SpeechClient(
+                settings.openai_api_key.get_secret_value(), stt_model=settings.voice_stt_model,
+                tts_model=settings.voice_tts_model, voice=settings.voice_name)
+        app.state.speech = speech_client
         yield
         tracing.flush()
+        if speech_client is not None and speech is None:
+            await speech_client.close()
         if jev is not None:
             await jev.close()
         if bank is not None and bank_repo is None:
@@ -200,7 +218,7 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             await engine.dispose()
 
     app = FastAPI(title="AI Platform", version="0.1.0", lifespan=lifespan)
-    security_headers = _security_headers(settings)
+    security_headers = _security_headers(settings, voice_on)
 
     @app.middleware("http")
     async def observe(request: Request, call_next):
@@ -299,7 +317,8 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         """Public settings the web UI needs to sign users in (nothing secret)."""
         return {"auth_mode": settings.auth_mode, "oidc_issuer": settings.oidc_issuer,
                 "oidc_client_id": settings.oidc_client_id,
-                "oidc_audience": settings.oidc_audience}
+                "oidc_audience": settings.oidc_audience,
+                "voice": voice_on, "voice_max_seconds": settings.voice_max_seconds}
 
     def password_mode() -> None:
         if settings.auth_mode != "password":
@@ -424,6 +443,35 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
             user_id, conv.id, body.text, body.language,
             customer_id=request.state.principal.customer_id, quick_action=body.quick_action))
 
+    @app.post("/v1/conversations/{conversation_id}/voice-runs")
+    async def run_voice(conversation_id: str, request: Request,
+                        user_id: Annotated[str, Depends(admit)],
+                        language: Language | None = None) -> StreamingResponse:
+        """A spoken message: the body is the recording (Content-Type: audio/webm, audio/mp4,
+        audio/ogg, audio/wav...). Streams a ``transcript`` event, the agent's usual
+        events with ``audio`` events (one per spoken sentence), and ``done``."""
+        if not voice_on:
+            raise HTTPException(404, "voice is not enabled")
+        content_type = request.headers.get("content-type", "")
+        if base_type(content_type) not in AUDIO_TYPES:
+            raise HTTPException(415, "send the recording as audio (webm, ogg, mp4, mp3 or wav)")
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > settings.voice_max_bytes:
+            raise HTTPException(413, "the recording is too long")
+        audio = bytearray()
+        async for chunk in request.stream():
+            audio += chunk
+            if len(audio) > settings.voice_max_bytes:
+                raise HTTPException(413, "the recording is too long")
+        if not audio:
+            raise HTTPException(422, "empty recording")
+        conv = await get_conversation(request, conversation_id, user_id, "agent")
+        state = request.app.state
+        return _stream(voice_turn(
+            state.agent, state.speech, state.tracing, user_id=user_id, conversation_id=conv.id,
+            audio=bytes(audio), content_type=content_type, language=language,
+            customer_id=request.state.principal.customer_id))
+
     @app.post("/v1/conversations/{conversation_id}/actions/{action_id}")
     async def decide_action(conversation_id: str, action_id: str, body: Decision,
                             request: Request,
@@ -513,7 +561,7 @@ SESSION_COOKIE = "aip_session"
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
-def _security_headers(settings: Settings) -> dict[str, str]:
+def _security_headers(settings: Settings, voice: bool = False) -> dict[str, str]:
     # The UI talks to this origin and, for OIDC login, to the issuer's token endpoint.
     connect = ["'self'"]
     if settings.auth_mode == "oidc" and settings.oidc_issuer:
@@ -522,10 +570,14 @@ def _security_headers(settings: Settings) -> dict[str, str]:
     return {
         "Content-Security-Policy": (
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            # Spoken answers play from blob: URLs (voice channel).
+            "media-src 'self' blob:; "
             f"connect-src {' '.join(connect)}; frame-ancestors 'none'; base-uri 'none'; "
             "form-action 'self'"),
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
+        # The microphone only for this origin, and only when the voice channel is on.
+        "Permissions-Policy": f"microphone=({'self' if voice else ''}), camera=(), geolocation=()",
     }
 
 
@@ -576,6 +628,13 @@ def _encode(event) -> list[str]:
             return [_event("handoff", {"handoff_id": handoff_id})]
         case HumanWaiting(handoff_id=handoff_id):
             return [_event("human_waiting", {"handoff_id": handoff_id})]
+        case Transcribed(text=text):
+            return [_event("transcript", {"text": text})]
+        case SpokenAudio(seq=seq, mime=mime, audio=audio):
+            return [_event("audio", {"seq": seq, "mime": mime,
+                                     "data": base64.b64encode(audio).decode()})]
+        case VoiceProblem(code=code):
+            return [_event("voice_error", {"code": code})]
         case AgentDone(outcome=outcome, tool_calls=tool_calls):
             frames = [_event("refusal", REFUSAL)] if outcome == "refused" else []
             return frames + [_event("done", {"outcome": outcome, "tool_calls": tool_calls})]

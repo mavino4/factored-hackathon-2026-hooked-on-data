@@ -197,3 +197,22 @@ def test_turns_are_grouped_by_who_decided_the_intent():
     assert by["jev"]["classify_cost_mean_usd"] == 0.00001
     assert by["jev"]["jev_agrees_with_llm"] == 1.0
     assert by["llm"]["jev_agrees_with_llm"] is None
+
+
+def test_turns_are_grouped_by_channel_with_the_voice_steps_apart():
+    voice_root = root("t7", 3.0)
+    voice_root["metadata"]["channel"] = "voice"
+    voice_turn = [voice_root, obs("t7", "classify", n=1),
+                  generation("t7", "classify.anthropic", 0.001, 1),
+                  obs("t7", "call_model", n=2), generation("t7", "agent.anthropic", 0.002, 2),
+                  generation("t7", "voice.stt", 0.0003, 3), generation("t7", "voice.tts", 0.0007, 4)]
+    scores = [{"name": "voice_first_audio_s", "value": 1.8, "subject": {"kind": "trace", "id": "t7"}},
+              {"name": "voice_stt_s", "value": 0.4, "subject": {"kind": "trace", "id": "t7"}}]
+    turns = build_turns([*account_turn(), *voice_turn], scores)
+    voice = turns[1]
+    assert (voice.channel, voice.first_audio_s, voice.stt_s) == ("voice", 1.8, 0.4)
+    assert round(voice.voice_cost, 6) == 0.001 and voice.model_s == [1.0]  # speech isn't a model call
+    by = summarize(turns)["by_channel"]
+    assert by["chat"]["turns"] == 1 and by["chat"]["first_audio"]["n"] == 0
+    assert by["voice"]["first_audio"]["p50_s"] == 1.8
+    assert by["voice"]["voice_cost_mean_usd"] == 0.001

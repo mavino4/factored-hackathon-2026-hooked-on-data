@@ -68,10 +68,20 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("ANTHROPIC_API_KEY", "AIP_ANTHROPIC_API_KEY"))
 
-    # OpenAI API key, read from OPENAI_API_KEY like the Claude key above. Only the intent
-    # classifier bench uses it (text-embedding-3-small, agent/classifiers/embeddings.py).
+    # OpenAI API key, read from OPENAI_API_KEY like the Claude key above. Used by the voice
+    # channel (below) and the intent classifier bench (agent/classifiers/embeddings.py).
     openai_api_key: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("OPENAI_API_KEY", "AIP_OPENAI_API_KEY"))
+
+    # Voice channel (voice/): push-to-talk in the web UI. The audio goes to OpenAI for
+    # speech-to-text and the answer comes back spoken; needs OPENAI_API_KEY.
+    voice_enabled: bool = False
+    voice_stt_model: str = "gpt-4o-mini-transcribe"
+    voice_tts_model: str = "gpt-4o-mini-tts"
+    voice_name: str = "coral"
+    # The longest recording the UI allows, and the largest upload the API accepts.
+    voice_max_seconds: int = Field(default=60, ge=5, le=120)
+    voice_max_bytes: int = Field(default=2_000_000, ge=100_000, le=10_000_000)
 
     # TypeSafe AI key, for Jev (agent/classifiers/jev.py).
     typesafe_api_key: SecretStr | None = Field(

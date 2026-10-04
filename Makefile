@@ -1,4 +1,4 @@
-.PHONY: intent-data classify-bench trace-report trace-score langfuse-mcp-env check lint test test-postgres smoke eval eval-banking eval-security banking-cases compare-models bank-db users users-relink run migrate docker-build lan prod tls langfuse-env langfuse-up langfuse-down
+.PHONY: intent-data classify-bench voice-bench trace-report trace-score langfuse-mcp-env check lint test test-postgres smoke eval eval-banking eval-security banking-cases compare-models bank-db users users-relink run migrate docker-build lan prod tls langfuse-env langfuse-up langfuse-down
 
 check: lint test
 
@@ -30,6 +30,9 @@ intent-data:  # test set from the suites + handwritten; train from Qwen (local) 
 
 classify-bench:  # non-LLM intent classifiers vs the LLM on the test set; ARGS="--only rules ml --errors"
 	uv run --group classifiers python -m evals.classify_bench $(ARGS)
+
+voice-bench:  # intent accuracy typed vs spoken (OpenAI TTS -> STT), cached; ARGS="--limit 120 --errors"
+	uv run python -m evals.voice_bench $(ARGS)
 
 trace-score:  # grade traced turns and write the grades to Langfuse; ARGS="--dry-run" or "--judge --sample 50"
 	uv run python -m evals.score_traces $(ARGS)

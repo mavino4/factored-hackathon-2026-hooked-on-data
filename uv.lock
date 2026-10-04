@@ -149,6 +149,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "langfuse" },
     { name = "langgraph" },
+    { name = "openai" },
     { name = "prometheus-client" },
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
@@ -159,7 +160,6 @@ dependencies = [
 [package.dev-dependencies]
 classifiers = [
     { name = "numpy" },
-    { name = "openai" },
     { name = "scikit-learn" },
 ]
 dev = [
@@ -179,6 +179,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "langfuse", specifier = ">=4.15.6" },
     { name = "langgraph", specifier = ">=1.2.12" },
+    { name = "openai", specifier = ">=3.24.0" },
     { name = "prometheus-client", specifier = ">=0.26.0" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.0" },
@@ -189,7 +190,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 classifiers = [
     { name = "numpy", specifier = ">=2.5.3" },
-    { name = "openai", specifier = ">=3.24.0" },
     { name = "scikit-learn", specifier = ">=1.9.1" },
 ]
 dev = [

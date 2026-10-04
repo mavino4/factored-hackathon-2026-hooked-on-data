@@ -8,6 +8,7 @@ actions of customers (accept or decline an offer) and operators (reply, close).
 
 import logging
 from collections.abc import AsyncIterator
+from typing import Literal
 
 from aiplatform.agent import quick
 from aiplatform.agent.actions import ActionStore
@@ -40,7 +41,7 @@ from aiplatform.agent.quick import QuickAction, QuickMode
 from aiplatform.agent.tools import Tool
 from aiplatform.chat.history import check_history_size
 from aiplatform.chat.inflight import InFlight
-from aiplatform.chat.prompts import reply_language
+from aiplatform.chat.prompts import turn_instructions
 from aiplatform.chat.repository import Conversation, ConversationRepository
 from aiplatform.graph_stream import stream_graph
 from aiplatform.llm.gateway import AIGateway
@@ -48,6 +49,9 @@ from aiplatform.tracing import Tracing, run_config
 from aiplatform.usage import UsageStore
 
 log = logging.getLogger(__name__)
+
+# How the customer talks to the assistant: typing, or speaking (voice/turn.py).
+Channel = Literal["chat", "voice"]
 
 
 class AgentRunner:
@@ -73,7 +77,10 @@ class AgentRunner:
     async def run(self, user_id: str, conversation_id: str, text: str,
                   language: str | None = None,
                   customer_id: str | None = None,
-                  quick_action: str | None = None) -> AsyncIterator[AgentEvent]:
+                  quick_action: str | None = None, channel: Channel = "chat",
+                  trace: dict | None = None) -> AsyncIterator[AgentEvent]:
+        """``channel``: "voice" when the customer spoke (spoken-style answers, traced apart);
+        ``trace`` gets the IDs of the run's trace, to attach the voice steps to it."""
         conv = await self._repo.get(conversation_id, user_id)
         with self._inflight.hold(conv.id):
             check_history_size(conv.messages)
@@ -85,7 +92,8 @@ class AgentRunner:
             action = quick.match(quick_action, text)
             await self._repo.append(conv, {"role": "user", "content": text})
             async for event in self._stream(user_id, conv, language, trace_input=text,
-                                            customer_id=customer_id, quick_action=action):
+                                            customer_id=customer_id, quick_action=action,
+                                            channel=channel, trace=trace):
                 yield event
 
     async def decide(self, user_id: str, conversation_id: str, action_id: str,
@@ -103,11 +111,12 @@ class AgentRunner:
                       decision: Decision | None = None,
                       trace_input: str | None = None,
                       customer_id: str | None = None,
-                      quick_action: QuickAction | None = None) -> AsyncIterator[AgentEvent]:
+                      quick_action: QuickAction | None = None, channel: Channel = "chat",
+                      trace: dict | None = None) -> AsyncIterator[AgentEvent]:
         handoff = await self.handoffs.latest(conv.id)
         # How this turn is routed: by the button (the configured mode) or by the classifier.
         routing = self._quick_mode if quick_action is not None else "model"
-        state = initial_state(user_id, conv, reply_language(language), decision,
+        state = initial_state(user_id, conv, turn_instructions(language, channel), decision,
                               language=language, handoff=handoff,
                               quick=quick_action if routing != "model" else None,
                               quick_direct=routing == "direct")
@@ -117,8 +126,10 @@ class AgentRunner:
             trace_input=trace_input or (decision._asdict() if decision else None),
             trace_sensitive=conv.messages,
             decision=decision._asdict() if decision else None,
-            quick_action=quick_action.key if quick_action else None, routing=routing)}
-        config["tags"].append(f"routing:{routing}")
+            quick_action=quick_action.key if quick_action else None, routing=routing,
+            channel=channel)}
+        config["tags"] += [f"routing:{routing}", f"channel:{channel}"]
+        config["trace_ref"] = trace
         async for event in stream_graph(self._graph, state, config, self._tracing):
             yield event
 

@@ -65,8 +65,9 @@ class Tracing:
         """Wrap one graph run (see ``run_config``); yields the config to run it with."""
         trace_input = config.get("trace_input")  # what started the run (masked on the way)
         history = config.get("trace_sensitive")  # earlier turns, whose values stay masked
+        ref = config.get("trace_ref")  # a dict that gets the trace's IDs (voice/turn.py)
         config = {k: v for k, v in config.items()
-                  if k not in ("trace_input", "trace_sensitive")}
+                  if k not in ("trace_input", "trace_sensitive", "trace_ref")}
         if self._client is None:
             yield config
             return
@@ -83,12 +84,32 @@ class Tracing:
             # Names, last 4 digits and amounts that tools returned in earlier turns are
             # masked from the first step, not only once a tool runs again in this turn.
             self._masker.register(history)
+            if ref is not None:
+                ref.update(trace_id=root.trace_id, span_id=root.id)
             token, root_token = _active.set(self), _root.set(root)
             try:
                 yield config
             finally:
                 _active.reset(token)
                 _root.reset(root_token)
+
+    def record_voice(self, ref: dict, steps: list[dict], scores: dict[str, float]) -> None:
+        """Attach the voice steps of a turn to its agent trace (``ref`` from ``run``):
+        ``steps`` are generations (``name``, ``model``, ``usage``, ``cost_usd``,
+        ``metadata``, optional ``output``, masked like the rest), ``scores`` numeric
+        trace scores such as the time to the first audio. No audio is ever sent."""
+        if self._client is None or not ref.get("trace_id"):
+            return
+        context = {"trace_id": ref["trace_id"], "parent_span_id": ref["span_id"]}
+        for step in steps:
+            self._client.start_observation(
+                trace_context=context, as_type="generation", name=step["name"],
+                model=step["model"], output=step.get("output"), metadata=step["metadata"],
+                usage_details=step["usage"], cost_details={"total": step["cost_usd"]},
+            ).end()
+        for name, value in scores.items():
+            self._client.create_score(trace_id=ref["trace_id"], name=name,
+                                      value=round(value, 3), data_type="NUMERIC")
 
     def flush(self) -> None:
         """Send pending traces (on shutdown)."""

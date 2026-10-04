@@ -19,6 +19,9 @@ services:
       # it the LLM classifies). AIP_INTENT_CLASSIFIER=llm make prod: the LLM only.
       AIP_INTENT_CLASSIFIER: ${AIP_INTENT_CLASSIFIER:-jev_llm}
       AIP_JEV_THRESHOLD: ${AIP_JEV_THRESHOLD:-0.9}
+      # Push-to-talk in the web UI: the recording goes to OpenAI (speech to text), the
+      # answer comes back spoken. Needs OPENAI_API_KEY in .env; off without it.
+      AIP_VOICE_ENABLED: ${AIP_VOICE_ENABLED:-true}
       # HTTPS only: browsers never send the session cookie over plain HTTP.
       AIP_SESSION_COOKIE_SECURE: "true"
       AIP_PROVIDERS: '["anthropic"]'

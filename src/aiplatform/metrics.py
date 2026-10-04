@@ -37,3 +37,16 @@ LLM_BREAKER_OPEN = Gauge(
 LLM_BELOW_CACHE_MIN = Counter(
     "aip_llm_prompt_below_cache_minimum_total",
     "Calls whose prompt is too short for the model to cache", ["route"])
+
+VOICE_STT_SECONDS = Histogram(
+    "aip_voice_transcription_seconds", "Speech-to-text call duration",
+    buckets=(0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 10, 20))
+VOICE_FIRST_AUDIO = Histogram(
+    "aip_voice_first_audio_seconds",
+    "Voice turn: audio received to the first spoken sentence ready (what the customer waits)",
+    buckets=(0.5, 1, 1.5, 2, 3, 4, 5, 7, 10, 15, 30))
+VOICE_ERRORS = Counter(
+    "aip_voice_errors_total", "Failed voice steps: transcription, speech, or nothing heard",
+    ["stage"])
+VOICE_COST = Counter(
+    "aip_voice_cost_usd_total", "Estimated voice cost in USD (list prices)", ["stage"])

@@ -79,6 +79,22 @@ def reply_language(language: str | None) -> str | None:
             f"reply in {name}, whatever language earlier messages or tool results use.")
 
 
+# Added to the per-request system block when the customer speaks (voice/turn.py): the
+# answer is read aloud as it is written, and also shown on screen.
+VOICE_STYLE = """\
+Channel: voice. The customer spoke this message (it was transcribed, so expect \
+transcription slips) and will HEAR your answer. Keep it to two or three short sentences. \
+No lists, tables, headings, bold or emoji: plain spoken sentences. Say amounts and dates \
+the way a person says them aloud. If something needs the customer's confirmation, say \
+they must confirm it on the screen. Ask a follow-up question only when you need one."""
+
+
+def turn_instructions(language: str | None, channel: str = "chat") -> str | None:
+    """The per-request system block: reply language and, on the voice channel, how to speak."""
+    parts = [reply_language(language), VOICE_STYLE if channel == "voice" else None]
+    return "\n\n".join(p for p in parts if p) or None
+
+
 CLASSIFY_SYSTEM_PROMPT = """\
 You route messages for BankBot, a bank's virtual assistant. Read the conversation and \
 classify the customer's LAST message by calling classify_intent. Do not answer the \

@@ -179,6 +179,8 @@ async function logout() {
 function resetView() {
   $("conversation-list").replaceChildren();
   stopPolling();
+  stopRecording(false);
+  stopSpeaking();
   $("chat-title").textContent = t("start");
   $("user-name").textContent = "";
   $("input").value = "";
@@ -212,10 +214,13 @@ class ApiError extends Error {
   }
 }
 
-async function api(path, { method = "GET", body } = {}) {
+// body: sent as JSON; raw: a Blob sent as is, with its own type (a voice recording).
+async function api(path, { method = "GET", body, raw } = {}) {
   const headers = { ...state.auth.header };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (raw !== undefined) headers["Content-Type"] = raw.type;
+  else if (body !== undefined) headers["Content-Type"] = "application/json";
+  const payload = raw !== undefined ? raw : body === undefined ? undefined : JSON.stringify(body);
+  const res = await fetch(path, { method, headers, body: payload });
   if (res.status === 401) {
     await logout();
     throw new ApiError(401, t("session_expired"));
@@ -229,8 +234,8 @@ async function api(path, { method = "GET", body } = {}) {
 }
 
 // POST and read Server-Sent Events from the response body (EventSource can't POST).
-async function streamEvents(path, body, onEvent) {
-  const res = await api(path, { method: "POST", body });
+async function streamEvents(path, body, onEvent, raw) {
+  const res = await api(path, { method: "POST", body, raw });
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -515,6 +520,7 @@ function setBusy(busy) {
   const disabled = busy || (!state.current && !state.draft);
   $("input").disabled = disabled;
   $("send").disabled = disabled;
+  $("mic").disabled = disabled && !recorder.media;
   if (!disabled) $("input").focus();
 }
 
@@ -582,16 +588,32 @@ function refreshLanguage() {
   }
 }
 
-// Stream one reply (a message or an approval decision).
-async function runStream(path, body) {
+// Stream one reply (a message, a recording or an approval decision). With ``audio`` (a
+// Blob), the request is a voice turn: the language goes in the URL and the answer is
+// also spoken.
+async function runStream(path, body, audio) {
   setBusy(true);
   let bubble = null;
   let failed = false;
-  showStatus(t("status_thinking"));
+  showStatus(t(audio ? "voice_sending" : "status_thinking"));
   try {
     // The assistant replies in the language the customer is looking at.
-    await streamEvents(path, { ...body, language: LANG }, (name, data) => {
+    const target = audio ? `${path}?language=${LANG}` : path;
+    await streamEvents(target, audio ? undefined : { ...body, language: LANG }, (name, data) => {
       switch (name) {
+        case "transcript":  // what the assistant understood: the customer's message
+          addBubble("user", data.text);
+          showStatus(t("status_thinking"));
+          scrollToBottom();
+          break;
+        case "audio":
+          enqueueSpeech(data.data, data.mime);
+          break;
+        case "voice_error":
+          hideStatus();
+          if (data.code === "speech_failed") addNote(t("voice_speech_failed"));
+          else addError(t(`voice_${data.code}`));
+          break;
         case "delta":
           hideStatus();
           if (!bubble) bubble = addBubble("assistant");
@@ -631,7 +653,7 @@ async function runStream(path, body) {
         case "done":
           break;
       }
-    });
+    }, audio);
   } catch (err) {
     failed = true;
     addError(err.message || t("connection_lost"));
@@ -654,10 +676,9 @@ async function send(event) {
   await sendText(text);
 }
 
-// quickAction: the key of the quick-action button that sent the text, if any.
-async function sendText(text, quickAction) {
-  if (!text || state.busy || (!state.current && !state.draft)) return;
-  if (state.draft) {  // first message of a new query: create it now
+// The first message of a new query creates it.
+async function ensureConversation() {
+  if (state.draft) {
     setBusy(true);
     let conv;
     try {
@@ -672,9 +693,142 @@ async function sendText(text, quickAction) {
   }
   messagesEl().querySelector(".empty")?.remove();
   messagesEl().querySelector(".quick-actions")?.remove();
+}
+
+// quickAction: the key of the quick-action button that sent the text, if any.
+async function sendText(text, quickAction) {
+  if (!text || state.busy || (!state.current && !state.draft)) return;
+  await ensureConversation();
   addBubble("user", text);
   await runStream(`/v1/conversations/${state.current.id}/agent-runs`,
     quickAction ? { text, quick_action: quickAction } : { text });
+}
+
+// ---------------------------------------------------------------------------
+// Voice: push to talk. Tap the mic to record, tap again to send; the answer is shown and
+// spoken sentence by sentence (audio events, played in order).
+// ---------------------------------------------------------------------------
+const recorder = { media: null, chunks: [], stream: null, timer: null, started: 0, keep: true };
+const player = { el: null, queue: [], url: null };
+const MIN_RECORDING_MS = 600;
+
+function voiceAvailable() {
+  return Boolean(state.config?.voice && navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+}
+
+function recordingType() {
+  for (const type of ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"]) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return "";
+}
+
+async function toggleRecording() {
+  if (recorder.media) stopRecording(true);
+  else await startRecording();
+}
+
+async function startRecording() {
+  if (state.busy || (!state.current && !state.draft)) return;
+  stopSpeaking();
+  // Created inside the tap, so phones let it play the answer later.
+  if (!player.el) player.el = new Audio();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(
+      { audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch {
+    addError(t("mic_denied"));
+    return;
+  }
+  const type = recordingType();
+  const media = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 32000 } : {});
+  Object.assign(recorder, { media, stream, chunks: [], started: Date.now(), keep: true });
+  media.addEventListener("dataavailable", (event) => {
+    if (event.data.size) recorder.chunks.push(event.data);
+  });
+  media.addEventListener("stop", () => {
+    const blob = new Blob(recorder.chunks, { type: (media.mimeType || type || "audio/webm").split(";")[0] });
+    const long = Date.now() - recorder.started >= MIN_RECORDING_MS;
+    const keep = recorder.keep;
+    stream.getTracks().forEach((track) => track.stop());
+    clearInterval(recorder.timer);
+    Object.assign(recorder, { media: null, stream: null, chunks: [], timer: null });
+    showRecording(false);
+    if (!keep) return;
+    if (!long) {
+      addNote(t("voice_too_short"));
+      return;
+    }
+    sendVoice(blob).catch((err) => addError(err.message || String(err)));
+  });
+  media.start();
+  showRecording(true);
+  const limit = (state.config.voice_max_seconds || 60) * 1000;
+  recorder.timer = setInterval(() => {
+    const elapsed = Date.now() - recorder.started;
+    if (elapsed >= limit) stopRecording(true);
+    else updateRecordingTime(elapsed);
+  }, 250);
+}
+
+// keep: send the recording (true) or discard it (false).
+function stopRecording(keep) {
+  if (!recorder.media) return;
+  recorder.keep = keep;
+  recorder.media.stop();
+}
+
+function showRecording(on) {
+  $("voice-bar").hidden = !on;
+  $("mic").classList.toggle("recording", on);
+  $("mic").setAttribute("aria-pressed", String(on));
+  $("input").disabled = on || state.busy;
+  $("send").disabled = on || state.busy;
+  if (on) updateRecordingTime(0);
+}
+
+function updateRecordingTime(ms) {
+  const seconds = Math.floor(ms / 1000);
+  const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  $("voice-status").textContent = t("recording", { time });
+}
+
+async function sendVoice(blob) {
+  if (state.busy) return;
+  await ensureConversation();
+  await runStream(`/v1/conversations/${state.current.id}/voice-runs`, null, blob);
+}
+
+function enqueueSpeech(base64, mime) {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  player.queue.push(new Blob([bytes], { type: mime }));
+  if (!player.url) playNextSpeech();
+}
+
+function playNextSpeech() {
+  if (player.url) URL.revokeObjectURL(player.url);
+  player.url = null;
+  const next = player.queue.shift();
+  $("stop-voice").hidden = !next;
+  if (!next) return;
+  if (!player.el) player.el = new Audio();
+  player.url = URL.createObjectURL(next);
+  player.el.src = player.url;
+  player.el.onended = playNextSpeech;
+  player.el.onerror = playNextSpeech;
+  player.el.play().catch(() => stopSpeaking());  // autoplay refused: the text is on screen
+}
+
+function stopSpeaking() {
+  player.queue = [];
+  if (player.el) {
+    player.el.onended = null;
+    player.el.pause();
+  }
+  if (player.url) URL.revokeObjectURL(player.url);
+  player.url = null;
+  $("stop-voice").hidden = true;
 }
 
 function autoResize() {
@@ -782,6 +936,10 @@ async function boot() {
     });
   }
   $("composer").addEventListener("submit", guard(send));
+  $("mic").addEventListener("click", guard(toggleRecording));
+  $("voice-cancel").addEventListener("click", () => stopRecording(false));
+  $("stop-voice").addEventListener("click", stopSpeaking);
+  $("mic").hidden = !voiceAvailable();
   $("input").addEventListener("input", autoResize);
   $("input").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {

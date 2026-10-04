@@ -92,6 +92,7 @@ make trace-report ARGS="--since 24h --check"   # exit 1 if a threshold in trace_
 make trace-report ARGS="--release 0fc4aaa --compare evals/results/traces-<earlier>.json"
 make trace-report ARGS="--quick"               # only turns sent by a quick-action button
 make trace-report ARGS="--routing intent"      # only turns routed by AIP_QUICK_ACTIONS=intent (or direct)
+make trace-report ARGS="--channel voice"       # only spoken turns (or chat: only typed ones)
 
 make trace-score ARGS="--dry-run"              # grade turns, write nothing
 make trace-score                               # write the grades to Langfuse as scores
@@ -107,6 +108,7 @@ make trace-score ARGS="--judge-jev --sample 40"  # does the LLM agree with Jev's
 | Cost | Total, per turn, per conversation, the classifier's share, tokens per turn, cache reads |
 | Classifier | Who decided the intent (`jev`, `llm`, `llm_low_confidence`, `llm_jev_error`): turns, classification latency and cost, turn p95, Jev/LLM agreement |
 | Intent | Share, p95 and p99 latency and mean cost of each classified intent |
+| Channel | Typed (`chat`) vs spoken (`voice`) turns: turn p95, time from the recording to the first spoken sentence (p50 / p95), transcription latency, mean cost and the speech part of it |
 | Routing | Per `AIP_QUICK_ACTIONS` mode (`model` = classifier, `intent`, `direct` = no model): turns, quick-action turns, latency, mean cost and model calls per turn. Compare modes on quick-action turns only (`--quick`): the questions are then the same |
 | Outcome | How turns ended: `done`, `blocked`, `handoff`, `max_iterations`, `incomplete` (no final step: an error or the customer left) |
 | Behaviour | Answered account questions that used a bank tool, iterations per turn, turns with an error or a retry |
@@ -181,3 +183,24 @@ attacks), F1 per intent, accuracy per source, language, tag and clean vs misspel
 per 1k messages, and a confidence view: for thresholds 0.5 / 0.7 / 0.9, the share of
 messages a classifier is that sure about and its accuracy on them. Rules are written from the intent definitions; tune them on the
 generated data, never on the test set's errors, or the score stops meaning anything.
+
+## Voice: typed vs spoken intent
+
+```bash
+make voice-bench                         # 60 messages (4 per language and intent), cached
+make voice-bench ARGS="--limit 120 --errors"
+```
+
+`evals/voice_bench.py` takes test messages a person could say (no history, no typo copies,
+no code or markup), reads each one aloud with OpenAI text-to-speech in one of several
+voices (`coral`, `ash`, `nova`, `onyx`; told to sound like a customer, not a narrator),
+transcribes it with the production speech-to-text (`AIP_VOICE_STT_MODEL`) and classifies
+the transcript again. Per language it reports the word and character error rate of the
+transcripts and the intent accuracy on the written text vs on the transcript, for the LLM,
+Jev and Jev+LLM at `AIP_JEV_THRESHOLD`; also attack recall, transcription latency, and the
+cost per 1,000 voice turns. `--errors` lists the messages whose intent changed when spoken.
+
+Audio, transcripts and predictions are cached in `evals/intents/.cache/voice/`, so only the
+first run pays (about US$0.05 for 60 messages). Synthetic voices are cleaner than real
+callers: no noise, accents or hesitation; treat the result as a lower bound of the loss.
+Needs `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `TYPESAFE_API_KEY` in `.env`.

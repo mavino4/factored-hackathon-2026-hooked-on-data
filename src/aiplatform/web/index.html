@@ -69,9 +69,18 @@
       <div id="messages" class="messages" aria-live="polite">
         <div class="empty muted" id="empty-state" data-i18n="empty_state"></div>
       </div>
+      <div id="voice-bar" class="voice-bar" hidden>
+        <span class="rec-dot" aria-hidden="true"></span>
+        <span id="voice-status" role="status"></span>
+        <button id="voice-cancel" type="button" class="link" data-i18n="cancel">Cancel</button>
+      </div>
       <form id="composer" class="composer">
         <textarea id="input" rows="1" placeholder="Send a message…" data-i18n-placeholder="placeholder"
                   maxlength="20000" disabled></textarea>
+        <button id="stop-voice" type="button" class="icon" hidden aria-label="Stop voice"
+                data-i18n-aria-label="stop_voice">⏹</button>
+        <button id="mic" type="button" class="mic" hidden disabled aria-label="Speak"
+                data-i18n-aria-label="speak" aria-pressed="false">🎤</button>
         <button id="send" class="primary" type="submit" disabled data-i18n="send">Send</button>
       </form>
     </section>

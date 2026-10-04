@@ -57,8 +57,9 @@ def history_of(case: dict) -> list[dict]:
 
 # --- The LLM classifier (production) ---------------------------------------------------------
 
-async def llm_predictions(cases: list[dict], refresh: bool) -> dict[str, dict]:
-    cached = {} if refresh else {r["id"]: r for r in read(LLM_CACHE)}
+async def llm_predictions(cases: list[dict], refresh: bool,
+                          cache: Path = LLM_CACHE) -> dict[str, dict]:
+    cached = {} if refresh else {r["id"]: r for r in read(cache)}
     todo = [c for c in cases if c["id"] not in cached]
     if not todo:
         return cached
@@ -95,16 +96,17 @@ async def llm_predictions(cases: list[dict], refresh: bool) -> dict[str, dict]:
     finally:
         await close_clients(clients)
     cached.update({r["id"]: r for r in rows})
-    LLM_CACHE.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n"
+    cache.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n"
                                  for r in cached.values()))
     return cached
 
 
-async def jev_predictions(cases: list[dict], refresh: bool, api_key: str) -> dict[str, dict]:
+async def jev_predictions(cases: list[dict], refresh: bool, api_key: str,
+                          cache: Path = JEV_CACHE) -> dict[str, dict]:
     """Jev on the test set, cached like the LLM (evals/intents/jev_predictions.jsonl)."""
     from aiplatform.agent.classifiers.jev import MODEL, JevClassifier, cost_usd
 
-    cached = {} if refresh else {r["id"]: r for r in read(JEV_CACHE)}
+    cached = {} if refresh else {r["id"]: r for r in read(cache)}
     todo = [c for c in cases if c["id"] not in cached]
     if not todo:
         return cached
@@ -128,7 +130,7 @@ async def jev_predictions(cases: list[dict], refresh: bool, api_key: str) -> dic
     finally:
         await jev.close()
     cached.update({r["id"]: r for r in rows})
-    JEV_CACHE.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n"
+    cache.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n"
                                  for r in cached.values()))
     return cached
 

@@ -2,6 +2,7 @@
 the assistant behaved, per customer turn.
 
     uv run python -m evals.traces [--since 7d] [--release SHA] [--routing MODE] [--quick]
+                                  [--classifier WHO] [--channel chat|voice]
                                   [--check [SLO_JSON]]
                                   [--compare RESULT_JSON] [--export-cases --outcome X]
 
@@ -52,6 +53,11 @@ class Turn:
     # llm_jev_error) and Jev's confidence. Older traces: "llm".
     classifier: str = "llm"
     jev_confidence: float | None = None
+    # "chat" (typed) or "voice" (spoken: transcribed, answer read aloud). Older: "chat".
+    channel: str = "chat"
+    voice_cost: float = 0.0  # speech-to-text and text-to-speech, part of ``cost``
+    stt_s: float | None = None
+    first_audio_s: float | None = None  # audio received to first spoken sentence ready
     latency_s: float | None = None
     intent: str | None = None
     outcome: str | None = None
@@ -120,6 +126,7 @@ def build_turns(observations: list[dict], scores: list[dict] = ()) -> list[Turn]
                     language=metadata.get("language"), latency_s=root.get("latency"),
                     routing=metadata.get("routing") or "model",
                     quick_action=metadata.get("quick_action") or None,
+                    channel=metadata.get("channel") or "chat",
                     question=root.get("input") if isinstance(root.get("input"), str) else None,
                     answer=root.get("output") if isinstance(root.get("output"), str) else None,
                     scores=dict(trace_scores.get(trace_id, {})))
@@ -138,7 +145,9 @@ def build_turns(observations: list[dict], scores: list[dict] = ()) -> list[Turn]
                 turn.cache_read_tokens += int(_number(usage.get("cache_read_input_tokens")))
                 if int(_number((obs.get("metadata") or {}).get("attempt"))) > 0:
                     turn.retries += 1
-                if name.startswith("classify."):
+                if name.startswith("voice."):  # speech in and out (voice/turn.py)
+                    turn.voice_cost += cost
+                elif name.startswith("classify."):
                     turn.classify_cost += cost
                     if latency is not None:
                         turn.classify_s.append(latency)
@@ -166,6 +175,10 @@ def build_turns(observations: list[dict], scores: list[dict] = ()) -> list[Turn]
         turn.classifier = turn.scores.get("classifier") or turn.classifier
         if turn.scores.get("jev_confidence") is not None:
             turn.jev_confidence = _number(turn.scores["jev_confidence"])
+        if turn.scores.get("voice_stt_s") is not None:
+            turn.stt_s = _number(turn.scores["voice_stt_s"])
+        if turn.scores.get("voice_first_audio_s") is not None:
+            turn.first_audio_s = _number(turn.scores["voice_first_audio_s"])
         turn.outcome = turn.scores.get("outcome") or turn.outcome or (
             "blocked" if "refuse_attack" in names
             else "handoff" if names & {"handoff", "wait_for_human"}
@@ -212,8 +225,10 @@ def summarize(turns: list[Turn], meta: dict | None = None) -> dict:
     intent_s: dict[str, list[float]] = defaultdict(list)
     routing_turns: dict[str, list[Turn]] = defaultdict(list)
     classifier_turns: dict[str, list[Turn]] = defaultdict(list)
+    channel_turns: dict[str, list[Turn]] = defaultdict(list)
     for t in turns:
         routing_turns[t.routing].append(t)
+        channel_turns[t.channel].append(t)
         if t.classify_s:  # turns that went through a classifier (Jev, the LLM or both)
             classifier_turns[t.classifier].append(t)
         if t.latency_s is not None:
@@ -285,6 +300,18 @@ def summarize(turns: list[Turn], meta: dict | None = None) -> dict:
                        sum(1 for t in group if t.scores.get("jev_agrees_llm") in (True, 1, 1.0)),
                        sum(1 for t in group if "jev_agrees_llm" in t.scores))}
             for name, group in sorted(classifier_turns.items())},
+        "by_channel": {
+            name: {"turns": len(group), "share": rate(len(group), n),
+                   "turn": spread([t.latency_s for t in group if t.latency_s is not None]),
+                   # Voice only: what the customer waits for, and the transcription.
+                   "first_audio": spread([t.first_audio_s for t in group
+                                          if t.first_audio_s is not None]),
+                   "transcription": spread([t.stt_s for t in group if t.stt_s is not None]),
+                   "mean_cost_usd": mean([t.cost for t in group]),
+                   "voice_cost_mean_usd": mean([t.voice_cost for t in group]),
+                   "intents": dict(Counter(t.intent or "none" for t in group)),
+                   "blocked_rate": rate(sum(t.outcome == "blocked" for t in group), len(group))}
+            for name, group in sorted(channel_turns.items())},
         "outcomes": {name: {"turns": count, "share": rate(count, n)}
                      for name, count in outcomes.most_common()},
         "behaviour": {
@@ -377,6 +404,14 @@ def print_report(s: dict) -> None:
         print(f"{name:<18}{v['turns']:>6} {_fmt(v['share'], '%'):>6} {_fmt(c['p50_s'], 's'):>13}"
               f" {_fmt(c['p95_s'], 's'):>5} {_fmt(v['classify_cost_mean_usd'], '$'):>10}"
               f" {_fmt(t['p95_s'], 's'):>10}  {_fmt(v['jev_agrees_with_llm'], '%')}")
+    print("\nChannel           turns   share  turn p95  1st audio p50  p95  "
+          "STT p50  mean cost  voice cost")
+    for name, v in s["by_channel"].items():
+        fa = v["first_audio"]
+        print(f"{name:<16}{v['turns']:>7} {_fmt(v['share'], '%'):>7} "
+              f"{_fmt(v['turn']['p95_s'], 's'):>9} {_fmt(fa['p50_s'], 's'):>14} "
+              f"{_fmt(fa['p95_s'], 's'):>5} {_fmt(v['transcription']['p50_s'], 's'):>8} "
+              f"{_fmt(v['mean_cost_usd'], '$'):>10} {_fmt(v['voice_cost_mean_usd'], '$'):>11}")
     print("\nOutcome: " + " · ".join(f"{name} {_fmt(v['share'], '%')} ({v['turns']})"
                                       for name, v in s["outcomes"].items()))
     b = s["behaviour"]
@@ -424,7 +459,8 @@ def to_case(turn: Turn) -> dict:
 
 def load_turns(api: LangfuseAPI, since: datetime, until: datetime | None = None,
                release: str | None = None, routing: str | None = None,
-               quick_only: bool = False, classifier: str | None = None) -> list[Turn]:
+               quick_only: bool = False, classifier: str | None = None,
+               channel: str | None = None) -> list[Turn]:
     observations = [o for o in api.observations(since, until)]
     # Inputs and outputs only where they are small and needed: steps and the run itself.
     detailed = {o["id"]: o for kind in ("SPAN", "AGENT")
@@ -434,7 +470,8 @@ def load_turns(api: LangfuseAPI, since: datetime, until: datetime | None = None,
     return [t for t in turns if (release is None or t.release == release)
             and (routing is None or t.routing == routing)
             and (not quick_only or t.quick_action)
-            and (classifier is None or t.classifier == classifier)]
+            and (classifier is None or t.classifier == classifier)
+            and (channel is None or t.channel == channel)]
 
 
 def main() -> int:
@@ -445,6 +482,8 @@ def main() -> int:
     parser.add_argument("--routing", help="only turns routed this way: model, intent...")
     parser.add_argument("--classifier",
                         help="only turns whose intent this decided: jev, llm, llm_low_confidence...")
+    parser.add_argument("--channel", choices=["chat", "voice"],
+                        help="only typed (chat) or spoken (voice) turns")
     parser.add_argument("--quick", action="store_true",
                         help="only turns sent by a quick-action button")
     parser.add_argument("--check", nargs="?", const=str(DEFAULT_SLO), metavar="SLO_JSON",
@@ -461,7 +500,7 @@ def main() -> int:
     try:
         turns = load_turns(api, parse_since(args.since),
                            parse_since(args.until) if args.until else None, args.release,
-                           args.routing, args.quick, args.classifier)
+                           args.routing, args.quick, args.classifier, args.channel)
     finally:
         api.close()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -480,7 +519,8 @@ def main() -> int:
     summary = summarize(turns, {"timestamp": datetime.now(UTC).isoformat(),
                                 "since": args.since, "until": args.until,
                                 "release": args.release, "routing": args.routing,
-                                "quick": args.quick, "classifier": args.classifier})
+                                "quick": args.quick, "classifier": args.classifier,
+                                "channel": args.channel})
     print_report(summary)
     out = out_dir / f"traces-{stamp}.json"
     out.write_text(json.dumps({**summary, "turn_rows": [

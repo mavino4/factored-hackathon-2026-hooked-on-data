@@ -12,6 +12,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "langfuse>=4.15.6",
     "langgraph>=1.2.12",
+    "openai>=3.24.0",
     "prometheus-client>=0.26.0",
     "pydantic-settings>=2.15.0",
     "pyjwt[crypto]>=2.15.0",
@@ -26,7 +27,6 @@ build-backend = "uv_build"
 [dependency-groups]
 classifiers = [
     "numpy>=2.5.3",
-    "openai>=3.24.0",
     "scikit-learn>=1.9.1",
 ]
 dev = [

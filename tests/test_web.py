@@ -42,7 +42,8 @@ def test_ui_config_and_csp_allow_the_oidc_issuer():
                     oidc_audience="https://api.example", oidc_client_id="spa-123") as http:
         config = http.get("/config.json").json()
         assert config == {"auth_mode": "oidc", "oidc_issuer": "https://tenant.example.com/",
-                          "oidc_client_id": "spa-123", "oidc_audience": "https://api.example"}
+                          "oidc_client_id": "spa-123", "oidc_audience": "https://api.example",
+                          "voice": False, "voice_max_seconds": 60}
         assert "connect-src 'self' https://tenant.example.com" in http.get("/").headers[
             "content-security-policy"]
 
