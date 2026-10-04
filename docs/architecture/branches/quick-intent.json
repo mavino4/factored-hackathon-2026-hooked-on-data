@@ -638,7 +638,7 @@
       "dot": "orange",
       "title": "Branch quick-intent: what changes",
       "items": [
-        "The UI offers five quick-action buttons for the most common questions",
+        "The five quick-action buttons (already in the UI) now send their key along with their text",
         "AIP_QUICK_ACTIONS=intent: a button with its own text skips the classifier (account intent); the agent still answers with the model and the bank tools",
         "A button is trusted only with its exact text; anything else is classified as usual",
         "Trace reports group turns by routing (model / intent) and quick action"
