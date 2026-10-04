@@ -1,0 +1,753 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "BankBot · branch intent-classifiers — Jev decides the intent first, the LLM below 0.9 confidence",
+    "output": ".archify/architecture-branches-20261003-235629/intent-classifiers.html",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:mavino4/DatathonFactored.git",
+      "link_mode": "local-only",
+      "revision": "16f106ec714a40b83297330310cfaef12f9a2c99"
+    }
+  },
+  "components": [
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "Operator",
+      "sublabel": "advisor · admin API",
+      "pos": [
+        290,
+        230
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 453,
+          "end_line": 458,
+          "label": "admin users only"
+        },
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 483,
+          "end_line": 504,
+          "label": "reply · close handoff"
+        }
+      ]
+    },
+    {
+      "id": "customer",
+      "type": "frontend",
+      "label": "Customer browser",
+      "sublabel": "chat · quick buttons",
+      "pos": [
+        40,
+        410
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/web/app.js",
+          "line": 706,
+          "end_line": 713,
+          "label": "password sign-in"
+        },
+        {
+          "path": "src/aiplatform/web/app.js",
+          "line": 231,
+          "label": "POST + read SSE"
+        },
+        {
+          "path": "src/aiplatform/web/app.js",
+          "line": 21,
+          "label": "quick-action buttons"
+        }
+      ]
+    },
+    {
+      "id": "lb",
+      "type": "cloud",
+      "label": "nginx (lb)",
+      "sublabel": "TLS · per-IP limits",
+      "pos": [
+        290,
+        410
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "tag": "LAN demo",
+      "sources": [
+        {
+          "path": "deploy/nginx.lan.conf",
+          "line": 5,
+          "end_line": 6,
+          "label": "rate-limit zones"
+        },
+        {
+          "path": "deploy/nginx.lan.conf",
+          "line": 25,
+          "end_line": 44,
+          "label": "TLS · admin allowlist"
+        },
+        {
+          "path": "docker-compose.lan.yml",
+          "line": 35,
+          "end_line": 40,
+          "label": "443 + certificates"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI app",
+      "sublabel": "auth · admission · SSE",
+      "pos": [
+        540,
+        410
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "2 replicas",
+      "sources": [
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 241,
+          "end_line": 275,
+          "label": "current_user · admit"
+        },
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 419,
+          "end_line": 437,
+          "label": "agent runs · decisions"
+        },
+        {
+          "path": "docker-compose.yml",
+          "line": 30,
+          "end_line": 48,
+          "label": "app service"
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "Agent runner",
+      "sublabel": "Jev ≥ 0.9 · else LLM",
+      "pos": [
+        790,
+        410
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/agent/loop.py",
+          "line": 73,
+          "end_line": 123,
+          "label": "run · decide · stream"
+        },
+        {
+          "path": "src/aiplatform/agent/graph.py",
+          "line": 275,
+          "end_line": 305,
+          "label": "classify intent"
+        },
+        {
+          "path": "src/aiplatform/agent/graph.py",
+          "line": 239,
+          "label": "Jev, then the LLM"
+        }
+      ],
+      "tag": "classifier: jev_llm"
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "AI Gateway",
+      "sublabel": "retry · failover",
+      "pos": [
+        1040,
+        410
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/llm/gateway.py",
+          "line": 135,
+          "end_line": 207,
+          "label": "stream with failover"
+        },
+        {
+          "path": "src/aiplatform/llm/resilience.py",
+          "line": 47,
+          "label": "CircuitBreaker"
+        },
+        {
+          "path": "src/aiplatform/llm/providers.py",
+          "line": 15,
+          "end_line": 45,
+          "label": "one client per provider"
+        }
+      ]
+    },
+    {
+      "id": "claude",
+      "type": "external",
+      "label": "Claude API",
+      "sublabel": "Haiku 4.5 on both routes",
+      "pos": [
+        1040,
+        590
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/llm/models.py",
+          "line": 90,
+          "end_line": 94,
+          "label": "classify + agent routes"
+        },
+        {
+          "path": "src/aiplatform/llm/providers.py",
+          "line": 24,
+          "end_line": 30,
+          "label": "AsyncAnthropic client"
+        },
+        {
+          "path": "docker-compose.lan.yml",
+          "line": 24,
+          "label": "LAN demo provider"
+        }
+      ]
+    },
+    {
+      "id": "langfuse",
+      "type": "external",
+      "label": "Langfuse",
+      "sublabel": "self-hosted trace UI",
+      "pos": [
+        790,
+        50
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "deploy/langfuse/docker-compose.yml",
+          "line": 56,
+          "end_line": 57,
+          "label": "langfuse-web"
+        },
+        {
+          "path": "docker-compose.lan.yml",
+          "line": 29,
+          "end_line": 33,
+          "label": "internal Docker network"
+        }
+      ]
+    },
+    {
+      "id": "tracing",
+      "type": "security",
+      "label": "Tracing + Masker",
+      "sublabel": "mask · outcome scores",
+      "pos": [
+        790,
+        230
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/tracing.py",
+          "line": 63,
+          "end_line": 90,
+          "label": "one trace per run"
+        },
+        {
+          "path": "src/aiplatform/privacy.py",
+          "line": 108,
+          "end_line": 124,
+          "label": "Masker"
+        },
+        {
+          "path": "src/aiplatform/tracing.py",
+          "line": 197,
+          "label": "intent · outcome scores"
+        }
+      ]
+    },
+    {
+      "id": "reports",
+      "type": "backend",
+      "label": "Trace reports",
+      "sublabel": "p50–p99 · cost · scores",
+      "tag": "make trace-report",
+      "sources": [
+        {
+          "path": "evals/traces.py",
+          "line": 201,
+          "label": "per-turn metrics"
+        },
+        {
+          "path": "evals/score_traces.py",
+          "line": 187,
+          "label": "write scores"
+        },
+        {
+          "path": "evals/langfuse_api.py",
+          "line": 24,
+          "label": "public API v2"
+        }
+      ],
+      "pos": [
+        1040,
+        50
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "jev",
+      "type": "external",
+      "label": "Jev (TypeSafe)",
+      "sublabel": "decision model · ~0.3 s",
+      "tag": "TYPESAFE_API_KEY",
+      "sources": [
+        {
+          "path": "src/aiplatform/agent/classifiers/jev.py",
+          "line": 21,
+          "label": "POST /v1/systemone"
+        },
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 74,
+          "label": "masked · 5 s timeout"
+        },
+        {
+          "path": "docker-compose.lan.yml",
+          "line": 20,
+          "label": "on in the LAN demo"
+        }
+      ],
+      "pos": [
+        1040,
+        230
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "accounts",
+      "type": "security",
+      "label": "Accounts",
+      "sublabel": "Argon2id · sessions",
+      "pos": [
+        290,
+        590
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "tag": "password mode",
+      "sources": [
+        {
+          "path": "src/aiplatform/accounts.py",
+          "line": 245,
+          "end_line": 275,
+          "label": "login"
+        },
+        {
+          "path": "src/aiplatform/accounts.py",
+          "line": 277,
+          "end_line": 293,
+          "label": "resolve session"
+        },
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 308,
+          "end_line": 324,
+          "label": "POST /v1/auth/login"
+        }
+      ]
+    },
+    {
+      "id": "banktools",
+      "type": "backend",
+      "label": "Bank tools",
+      "sublabel": "2 read-only tools",
+      "pos": [
+        860,
+        590
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/banking/tools.py",
+          "line": 65,
+          "end_line": 113,
+          "label": "profile · products"
+        },
+        {
+          "path": "src/aiplatform/api/app.py",
+          "line": 175,
+          "end_line": 183,
+          "label": "wired at startup"
+        }
+      ]
+    },
+    {
+      "id": "appdb",
+      "type": "database",
+      "label": "App database (aiplatform)",
+      "sublabel": "conversations · messages · usage · handoffs · users · sessions",
+      "pos": [
+        290,
+        770
+      ],
+      "size": [
+        410,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/storage/tables.py",
+          "line": 10,
+          "end_line": 123,
+          "label": "tables"
+        },
+        {
+          "path": "src/aiplatform/storage/sql.py",
+          "line": 284,
+          "end_line": 370,
+          "label": "SqlAccountStore"
+        },
+        {
+          "path": "docker-compose.yml",
+          "line": 5,
+          "end_line": 16,
+          "label": "db service"
+        }
+      ]
+    },
+    {
+      "id": "bankdb",
+      "type": "database",
+      "label": "Bank database",
+      "sublabel": "RLS · indexed subquery",
+      "pos": [
+        860,
+        770
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/aiplatform/banking/repository.py",
+          "line": 87,
+          "end_line": 97,
+          "label": "SET LOCAL app.subject"
+        },
+        {
+          "path": "deploy/bankdb/schema.sql",
+          "line": 76,
+          "label": "RLS policies"
+        },
+        {
+          "path": "docker-compose.yml",
+          "line": 42,
+          "end_line": 43,
+          "label": "bank_reader URL"
+        }
+      ]
+    },
+    {
+      "id": "provision",
+      "type": "backend",
+      "label": "scripts/users.py",
+      "sublabel": "make users · operator CLI",
+      "pos": [
+        1040,
+        950
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "scripts/users.py",
+          "line": 113,
+          "end_line": 165,
+          "label": "provision accounts"
+        },
+        {
+          "path": "scripts/users.py",
+          "line": 107,
+          "end_line": 110,
+          "label": "link to customers"
+        },
+        {
+          "path": "Makefile",
+          "line": 50,
+          "end_line": 51,
+          "label": "make users"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "db container · postgres:16",
+      "wraps": [
+        "appdb",
+        "bankdb"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "customer-https",
+      "from": "customer",
+      "to": "lb",
+      "label": "HTTPS :443",
+      "variant": "emphasis"
+    },
+    {
+      "id": "operator-admin",
+      "from": "operator",
+      "to": "lb",
+      "label": "/v1/admin/ · this host",
+      "variant": "security"
+    },
+    {
+      "id": "lb-proxy",
+      "from": "lb",
+      "to": "api",
+      "label": "proxy · SSE",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-accounts",
+      "from": "api",
+      "to": "accounts",
+      "label": "login · resolve cookie",
+      "variant": "security"
+    },
+    {
+      "id": "accounts-store",
+      "from": "accounts",
+      "to": "appdb",
+      "label": "hashes · sessions · audit",
+      "variant": "security"
+    },
+    {
+      "id": "api-store",
+      "from": "api",
+      "to": "appdb",
+      "label": "conversations · quota"
+    },
+    {
+      "id": "api-agent",
+      "from": "api",
+      "to": "agent",
+      "label": "run · decide",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "agent-store",
+      "from": "agent",
+      "to": "appdb",
+      "label": "messages · actions · handoffs",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "agent-tools",
+      "from": "agent",
+      "to": "banktools",
+      "label": "account intent · quick answer"
+    },
+    {
+      "id": "tools-bankdb",
+      "from": "banktools",
+      "to": "bankdb",
+      "label": "read-only SELECT"
+    },
+    {
+      "id": "agent-gateway",
+      "from": "agent",
+      "to": "gateway",
+      "label": "stream()",
+      "variant": "emphasis"
+    },
+    {
+      "id": "gateway-claude",
+      "from": "gateway",
+      "to": "claude",
+      "label": "Messages API",
+      "variant": "emphasis"
+    },
+    {
+      "id": "agent-tracing",
+      "from": "agent",
+      "to": "tracing",
+      "label": "run · step · tool spans",
+      "variant": "dashed"
+    },
+    {
+      "id": "tracing-langfuse",
+      "from": "tracing",
+      "to": "langfuse",
+      "label": "masked traces · scores",
+      "variant": "dashed"
+    },
+    {
+      "id": "provision-link",
+      "from": "provision",
+      "to": "bankdb",
+      "label": "link customer_logins",
+      "variant": "dashed"
+    },
+    {
+      "id": "provision-users",
+      "from": "provision",
+      "to": "appdb",
+      "label": "create users · audit",
+      "variant": "dashed"
+    },
+    {
+      "id": "reports-langfuse",
+      "from": "reports",
+      "to": "langfuse",
+      "label": "read · score",
+      "variant": "dashed"
+    },
+    {
+      "id": "agent-jev",
+      "from": "agent",
+      "to": "jev",
+      "label": "masked transcript",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "orange",
+      "title": "Branch intent-classifiers: what changes",
+      "items": [
+        "AIP_INTENT_CLASSIFIER=jev_llm: Jev (TypeSafe decision model) classifies first, on the masked transcript",
+        "Its intent is taken at 0.9 confidence or more (about 72% of turns, 98% correct); below, or on error, the LLM decides",
+        "Traces record who decided (classifier score, jev_confidence) and Jev's cost; score_traces --judge-jev checks Jev against the LLM",
+        "Offline bench (not in the request path): rules, TF-IDF, bge-m3 and OpenAI embeddings with logreg / kNN / RF / boosting, Jev and the LLM on 698 test messages",
+        "Bank RLS policies use an indexed scalar subquery (14.6 s → 13 ms on a cold query)"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Request path",
+      "items": [
+        "The API serves the web UI and streams each agent run as Server-Sent Events",
+        "Admission before a run: 20 requests/min per user (per replica) and a daily token quota read from usage_events",
+        "nginx adds 30 r/m per client IP on /v1/ and 6 r/m on sign-in; port 80 only redirects to HTTPS",
+        "/v1/admin/ (usage, handoffs) answers only requests from the host machine"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Agent graph",
+      "items": [
+        "Jev classifies the masked transcript first; at 0.9 confidence or more its intent is taken, below it or on error the LLM classifier decides",
+        "human → open handoff: the bot stays quiet until the operator closes it",
+        "attack → fixed reply, no agent, no tools",
+        "account → the first model call must use a bank tool; general and out-of-scope get no tools",
+        "Model and tools loop up to 8 iterations; irreversible tools become pending actions that wait for approval",
+        "Insistence without resolution offers a human advisor"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Sign-in and sessions",
+      "items": [
+        "Passwords stored as Argon2id hashes; the browser holds an opaque token in an HttpOnly, SameSite=Strict cookie and the database only its SHA-256",
+        "5 failed sign-ins lock an account for 15 min; sessions end after 30 min idle or 8 h",
+        "One answer for every failure, so usernames cannot be probed",
+        "Other modes: OIDC bearer JWT verified against the issuer's JWKS; dev header mode is refused in production"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Bank data isolation",
+      "items": [
+        "The app connects as bank_reader in read-only transactions with a 5 s statement timeout",
+        "Each query first sets app.subject to the signed-in user; Row-Level Security then shows only that customer's rows",
+        "The customer comes from the session: the model cannot pass a customer ID or account number",
+        "scripts/users.py names accounts after the email's first part and writes the only plain-text passwords to credentials/"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Tracing privacy",
+      "items": [
+        "Off unless enabled; every payload passes the Masker before it leaves the process",
+        "Values returned by bank tools stay masked for the rest of the run and in later turns",
+        "Trace user is the bank customer ID, else a keyed hash; the username is never sent",
+        "The gateway adds one generation per model attempt with tokens and cost",
+        "Scores per trace: intent, outcome, prompt_injection, classifier, jev_confidence"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Model calls and operations",
+      "items": [
+        "Providers are tried in AIP_PROVIDERS order; a conversation sticks to the provider that served it",
+        "Up to 3 attempts per provider with backoff, then failover; SDK retries are disabled",
+        "Ollama (local model, dev default) and the Bedrock and Vertex clients go through the same gateway when AIP_PROVIDERS lists them",
+        "Without AIP_DATABASE_URL the stores are in-memory; password mode requires the database in production",
+        "Prometheus metrics on the internal port 9090; Alembic migrations run as the migrate service"
+      ]
+    }
+  ]
+}
