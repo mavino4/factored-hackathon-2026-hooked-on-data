@@ -24,7 +24,7 @@ two consecutive branches (added, removed, changed).
 | Who decides the intent | LLM classifier | button, else LLM | button, else LLM | Jev ≥ 0.9, else LLM | Jev ≥ 0.9, else LLM |
 | Model calls for a quick action | classifier + agent | agent | none | agent (quick modes kept) | agent (quick modes kept) |
 | New external services | — | — | — | Jev (TypeSafe API) | Jev, OpenAI audio |
-| How the customer talks | typing | typing, buttons | typing, buttons | typing, buttons | typing, buttons, voice |
+| How the customer talks | typing, buttons (sent as text) | typing, buttons (key trusted) | typing, buttons | typing, buttons | typing, buttons, voice |
 | Added to traces | intent, outcome, release | routing metadata | routing metadata | classifier, jev_confidence, jev_agrees_llm | channel, voice_stt_s, voice_first_audio_s |
 
 Measured results behind these choices (Jev vs the LLM, voice vs text) are in
