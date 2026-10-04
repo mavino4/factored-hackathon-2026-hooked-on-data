@@ -66,6 +66,19 @@ def test_sentences_are_cut_at_their_ends_not_inside_figures_or_abbreviations():
                    "El Sr. Pérez es tu asesor.", "Tarjeta: $2.000.000", "CDT: 3.5% anual"]
 
 
+def test_the_first_clip_may_end_at_a_long_clause_to_start_speaking_sooner():
+    buffer = SentenceBuffer()
+    assert buffer.feed("Revisé sus productos y su tarjeta terminada en 5859, ") == [
+        "Revisé sus productos y su tarjeta terminada en 5859"]
+    # Afterwards only whole sentences (a short one joins the next); a decimal comma is
+    # never a cut.
+    assert buffer.feed("está al día. Su cupo disponible es de 1,5 millones, ") == []
+    assert buffer.feed("sin cambios. ") == [
+        "está al día. Su cupo disponible es de 1,5 millones, sin cambios."]
+    short = SentenceBuffer()
+    assert short.feed("Hola, Ana. ") == [] and short.flush() == ["Hola, Ana."]
+
+
 def test_nothing_to_say_is_not_spoken():
     buffer = SentenceBuffer()
     assert buffer.feed("---\n\n") == [] and buffer.flush() == []
