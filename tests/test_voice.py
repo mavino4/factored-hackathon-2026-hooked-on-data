@@ -14,6 +14,7 @@ from aiplatform.api.app import create_app
 from aiplatform.config import Settings
 from aiplatform.llm.gateway import AIGateway
 from aiplatform.tracing import Tracing
+from aiplatform.voice.numbers import split_number, spoken
 from aiplatform.voice.sentences import SentenceBuffer, speakable
 from aiplatform.voice.speech import Speech, SpeechClient, Transcript, speech_cost
 from aiplatform.voice.turn import (
@@ -75,6 +76,53 @@ def test_markdown_is_read_as_plain_text():
     assert speakable("## Saldos\n| Producto | Saldo |\n|---|---|\n| Ahorros | $10 |") == (
         "Saldos\nProducto, Saldo\nAhorros, $10")
     assert speakable("Vea [la app](https://bank.example) o `llame`.") == "Vea la app o llame."
+
+
+# -- Figures read aloud -----------------------------------------------------------------
+
+@pytest.mark.parametrize(("text", "language", "said"), [
+    ("Su saldo es de 1.200.000,00 COP.", "es", "Su saldo es de un millón doscientos mil pesos."),
+    ("Tiene $1.250,50 disponibles.", "es",
+     "Tiene mil doscientos cincuenta pesos con cincuenta centavos disponibles."),
+    ("Un cupo de 21.000.000 COP y 31.500.000 COP.", "es",
+     "Un cupo de veintiún millones de pesos y treinta y un millones quinientos mil pesos."),
+    ("Your balance is 1,234.56 USD.", "en",
+     "Your balance is one thousand two hundred and thirty-four dollars and fifty-six cents."),
+    ("Seu saldo é R$ 2.500,00.", "pt", "Seu saldo é dois mil e quinhentos reais."),
+    ("Debe 0,05 USD", "es", "Debe cinco centavos"),
+    ("Su tarjeta terminada en 5859", "es", "Su tarjeta terminada en cincuenta y ocho cincuenta y nueve"),
+    ("O cartão final 0123", "pt", "O cartão final zero um vinte e três"),
+    ("La tasa es 3,5 % y vence el 2026-10-15.", "es",
+     "La tasa es tres coma cinco por ciento y vence el quince de octubre de dos mil veintiséis."),
+    ("Interest is 12.75% until 2026-01-01.", "en",
+     ("Interest is twelve point seventy-five percent until January first, two thousand and "
+      "twenty-six.")),
+    ("Tiene 1 producto y 21 días de mora.", "es", "Tiene un producto y veintiún días de mora."),
+    ("Hola, ¿en qué puedo ayudarle?", "es", "Hola, ¿en qué puedo ayudarle?"),
+])
+def test_figures_are_said_as_whole_quantities(text, language, said):
+    assert spoken(text, language) == said
+
+
+def test_separators_are_read_by_their_position():
+    assert split_number("1.234.567,89") == (1234567, "89")
+    assert split_number("1,234.56") == (1234, "56")
+    assert split_number("1.250") == (1250, "") and split_number("3.5") == (3, "5")
+    assert split_number("0,05") == (0, "05") and split_number("12") == (12, "")
+
+
+async def test_the_screen_keeps_the_figures_and_the_voice_says_them():
+    client = FakeClient(final("Su saldo disponible es de 1.200.000,00 COP en ahorros."))
+    agent, _, _, conv = await runner(client)
+    speech = FakeSpeech()
+    events = await collect(voice_turn(agent, speech, None, user_id="u1",
+                                      conversation_id=conv.id, audio=b"x",
+                                      content_type="audio/webm", language="es"))
+    shown = "".join(e.text for e in events if isinstance(e, AgentText))
+    assert "1.200.000,00 COP" in shown
+    assert speech.spoken == ["Su saldo disponible es de un millón doscientos mil pesos en ahorros."]
+    system = json.dumps(client.calls[0]["system"], ensure_ascii=False)
+    assert "as figures with their currency" in system
 
 
 # -- OpenAI speech client ---------------------------------------------------------------

@@ -12,6 +12,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "langfuse>=4.15.6",
     "langgraph>=1.2.12",
+    "num2words>=0.5.14",
     "openai>=3.24.0",
     "prometheus-client>=0.26.0",
     "pydantic-settings>=2.15.0",

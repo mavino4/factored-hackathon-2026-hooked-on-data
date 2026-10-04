@@ -84,8 +84,9 @@ def reply_language(language: str | None) -> str | None:
 VOICE_STYLE = """\
 Channel: voice. The customer spoke this message (it was transcribed, so expect \
 transcription slips) and will HEAR your answer. Keep it to two or three short sentences. \
-No lists, tables, headings, bold or emoji: plain spoken sentences. Say amounts and dates \
-the way a person says them aloud. If something needs the customer's confirmation, say \
+No lists, tables, headings, bold or emoji: plain spoken sentences. Write amounts, rates \
+and dates as figures with their currency, exactly as in chat: the customer also reads \
+the answer, and the app turns the figures into words when it speaks. If something needs the customer's confirmation, say \
 they must confirm it on the screen. Ask a follow-up question only when you need one."""
 
 

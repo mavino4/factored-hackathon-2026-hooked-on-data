@@ -27,8 +27,8 @@ VOCABULARY = {
           "statement, loan, advisor.",
 }
 
-TONE = ("Speak as a friendly, calm bank advisor: clear, warm and unhurried. Read amounts "
-        "and dates naturally.")
+TONE = ("Speak as a friendly, calm bank advisor: clear, warm and unhurried. Read numbers "
+        "as whole quantities, never digit by digit.")
 
 # What the browser records: MIME type (without codec parameters) -> file name for the API.
 AUDIO_TYPES = {

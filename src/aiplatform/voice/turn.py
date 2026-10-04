@@ -1,6 +1,7 @@
 """One voice turn: the customer's audio is transcribed, the transcript goes through the same
 agent as a typed message (classifier, tools, approvals, handoff, tracing), and the answer
-is spoken sentence by sentence while it is being written.
+is spoken sentence by sentence while it is being written. The written answer keeps its
+figures ("1.200.000,00 COP"); what is spoken has them in words (voice/numbers.py).
 
 Events, in order: ``Transcribed`` (what was understood), then the agent's own events with
 a ``SpokenAudio`` after each sentence as soon as it is synthesized (in order, a few at a
@@ -23,6 +24,7 @@ from aiplatform import metrics
 from aiplatform.agent.events import AgentDone, AgentText, ApprovalRequired, HandoffOffered
 from aiplatform.agent.loop import AgentRunner
 from aiplatform.tracing import Tracing
+from aiplatform.voice.numbers import spoken as spoken_figures
 from aiplatform.voice.sentences import SentenceBuffer
 from aiplatform.voice.speech import Speech, SpeechClient, Transcript
 
@@ -98,8 +100,9 @@ async def voice_turn(agent: AgentRunner, speech: SpeechClient, tracing: Tracing 
         await queue.put(("audio", seq, result))
 
     def say(texts: list[str]) -> None:
+        # The screen keeps the figures; the voice says them as whole quantities.
         for text in texts:
-            tasks.append(asyncio.create_task(speak(len(tasks), text)))
+            tasks.append(asyncio.create_task(speak(len(tasks), spoken_figures(text, language))))
 
     async def produce() -> None:
         try:
