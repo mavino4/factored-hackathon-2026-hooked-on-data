@@ -101,6 +101,11 @@ class BackendStack(Stack):
             ec2.Port.tcp(8000),
             "FastAPI",
         )
+        security_group.add_ingress_rule(
+            ec2.Peer.any_ipv4(),
+            ec2.Port.tcp(3000),
+            "Langfuse",
+        )
 
         instance = ec2.Instance(
             self,
@@ -110,7 +115,7 @@ class BackendStack(Stack):
                 subnet_type=ec2.SubnetType.PUBLIC,
             ),
             associate_public_ip_address=True,
-            instance_type=ec2.InstanceType("t3.small"),
+            instance_type=ec2.InstanceType("t3.large"),
             machine_image=ec2.MachineImage.latest_amazon_linux2023(),
             security_group=security_group,
             role=role,
@@ -170,6 +175,20 @@ class BackendStack(Stack):
             "BackendUrlHost",
             value="http://" + instance.instance_public_dns_name + ":8000/",
             description="Application URL using the public DNS name",
+        )
+
+        cdk.CfnOutput(
+            self,
+            "LangfuseUrlIp",
+            value="http://" + instance.instance_public_ip + ":3000/",
+            description="Langfuse URL using the public IP",
+        )
+
+        cdk.CfnOutput(
+            self,
+            "LangfuseUrlHost",
+            value="http://" + instance.instance_public_dns_name + ":3000/",
+            description="Langfuse URL using the public DNS name",
         )
 
         cdk.CfnOutput(
