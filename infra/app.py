@@ -55,7 +55,7 @@ class BackendStack(Stack):
                     },
                     "StringLike": {
                         "token.actions.githubusercontent.com:sub":
-                        "repo:mavino4/DatathonFactored:ref:refs/heads/aws-deploy",
+                        "repo:mavino4/DatathonFactored:*",
                     },
                 },
             ),
