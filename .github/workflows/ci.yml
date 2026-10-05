@@ -86,3 +86,35 @@ jobs:
       #     password: ${{ secrets.GITHUB_TOKEN }}
       # ...then set push: true and tags: ghcr.io/<owner>/aiplatform:${{ github.sha }}
       # (and add `packages: write` to permissions).
+  jobs:
+    deploy:
+      runs-on: ubuntu-latest
+
+      steps:
+
+        - name: Checkout
+          uses: actions/checkout@v4
+
+        - name: Configure AWS credentials
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+            aws-region: ${{ vars.AWS_REGION }}
+            role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+
+        - name: Login to ECR
+          uses: aws-actions/amazon-ecr-login@v2
+
+        - name: Build image
+          run: |
+            docker build -t factored-api .
+
+        - name: Tag image
+          run: |
+            docker tag factored-api:latest \
+              ${{ vars.ECR_REGISTRY }}/factored-api:latest
+
+        - name: Push image
+          run: |
+            docker push \
+              ${{ vars.ECR_REGISTRY }}/factored-api:latest
+
