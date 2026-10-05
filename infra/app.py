@@ -126,6 +126,32 @@ class BackendStack(Stack):
             "usermod -a -G docker ec2-user",
         )
 
+        github_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["ssm:SendCommand"],
+                resources=[
+                    f"arn:aws:ssm:{self.region}::document/AWS-RunShellScript",
+                    self.format_arn(
+                        service="ec2",
+                        resource="instance",
+                        resource_name=instance.instance_id,
+                    ),
+                ],
+            )
+        )
+        github_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["ssm:GetCommandInvocation"],
+                resources=["*"],
+            )
+        )
+
+        cdk.CfnOutput(
+            self,
+            "InstanceId",
+            value=instance.instance_id,
+        )
+
         cdk.CfnOutput(
             self,
             "InstancePublicIp",
