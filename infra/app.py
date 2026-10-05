@@ -54,12 +54,23 @@ class BackendStack(Stack):
                         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
                     },
                     "StringLike": {
+                        # Repos created after 2026-07-15 put immutable owner/repo
+                        # ids in the OIDC sub claim:
+                        # repo:OWNER@OWNER_ID/REPO@REPO_ID:ref:...
                         "token.actions.githubusercontent.com:sub":
-                        "repo:mavino4/DatathonFactored:*",
+                        "repo:mavino4@33271590/DatathonFactored@1391763945:*",
                     },
                 },
             ),
         )
+
+        github_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["ecr:GetAuthorizationToken"],
+                resources=["*"],
+            )
+        )
+        repository.grant_pull_push(github_role)
 
         vpc = ec2.Vpc(
             self,
