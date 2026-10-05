@@ -27,7 +27,10 @@ class BackendStack(Stack):
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
                     "AmazonSSMManagedInstanceCore"
-                )
+                ),
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "AmazonEC2ContainerRegistryReadOnly"
+                ),
             ],
         )
 
@@ -68,6 +71,12 @@ class BackendStack(Stack):
             iam.PolicyStatement(
                 actions=["ecr:GetAuthorizationToken"],
                 resources=["*"],
+            )
+        )
+        github_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["cloudformation:DescribeStacks"],
+                resources=[self.stack_id],
             )
         )
         repository.grant_pull_push(github_role)
@@ -120,7 +129,21 @@ class BackendStack(Stack):
         cdk.CfnOutput(
             self,
             "InstancePublicIp",
-            value=instance.instance_public_dns_name,
+            value=instance.instance_public_ip,
+        )
+
+        cdk.CfnOutput(
+            self,
+            "BackendUrlIp",
+            value="http://" + instance.instance_public_ip + ":8000/",
+            description="Application URL using the public IP",
+        )
+
+        cdk.CfnOutput(
+            self,
+            "BackendUrlHost",
+            value="http://" + instance.instance_public_dns_name + ":8000/",
+            description="Application URL using the public DNS name",
         )
 
         cdk.CfnOutput(

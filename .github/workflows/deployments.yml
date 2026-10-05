@@ -36,3 +36,16 @@ jobs:
 
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Print application URLs
+        run: |
+          URL_IP=$(aws cloudformation describe-stacks \
+            --stack-name BackendStack \
+            --query "Stacks[0].Outputs[?OutputKey=='BackendUrlIp'].OutputValue" \
+            --output text)
+          URL_HOST=$(aws cloudformation describe-stacks \
+            --stack-name BackendStack \
+            --query "Stacks[0].Outputs[?OutputKey=='BackendUrlHost'].OutputValue" \
+            --output text)
+          echo "URL (IP):   $URL_IP"
+          echo "URL (host): $URL_HOST"
