@@ -4,6 +4,7 @@ import aws_cdk as cdk
 from aws_cdk import (
     Stack,
     aws_ec2 as ec2,
+    aws_ecr as ecr,
     aws_iam as iam,
 )
 from constructs import Construct
@@ -18,7 +19,6 @@ class BackendStack(Stack):
         **kwargs,
     ):
         super().__init__(scope, construct_id, **kwargs)
-
 
         role = iam.Role(
             self,
@@ -112,6 +112,11 @@ class BackendStack(Stack):
             value=instance.instance_public_dns_name,
         )
 
+        cdk.CfnOutput(
+            self,
+            "GitHubActionsRoleArn",
+            value=github_role.role_arn,
+        )
 
 if __name__ == "__main__":
     
