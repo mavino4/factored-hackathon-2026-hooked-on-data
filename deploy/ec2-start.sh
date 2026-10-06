@@ -122,29 +122,105 @@ for _ in $(seq 1 20); do
 done
 test "$ok" = 1
 
-# HTTPS so the browser treats the page as a secure context (microphone).
-# The public address changes on stop/start, so the certificate is reissued then.
-PUBLIC_HOST=$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-hostname)
-mkdir -p /opt/factored-tls
+# HTTPS with a certificate browsers trust (Let's Encrypt, for this public IP).
+# IP certificates last about six days, so a daily timer renews them. A new
+# public IP on stop/start gets a new certificate. Port 80 only redirects.
+mkdir -p /opt/factored-tls/acme /opt/factored-tls/letsencrypt /opt/factored-tls/letsencrypt-lib
 if [ ! -f /opt/factored-tls/default.conf ]; then
   echo "missing /opt/factored-tls/default.conf (deploy/nginx.ec2.conf)" >&2
   exit 1
 fi
-need_cert=1
-if [ -f /opt/factored-tls/cert.pem ] && [ -f /opt/factored-tls/key.pem ]; then
-  if openssl x509 -in /opt/factored-tls/cert.pem -noout -checkend 604800 >/dev/null 2>&1 \
-    && openssl x509 -in /opt/factored-tls/cert.pem -noout -ext subjectAltName 2>/dev/null \
-      | grep -q "IP Address:${PUBLIC_IP}"; then
-    need_cert=0
-  fi
-fi
-if [ "$need_cert" = 1 ]; then
-  openssl req -x509 -newkey rsa:2048 -sha256 -days 90 -nodes \
+if [ ! -s /opt/factored-tls/cert.pem ] || [ ! -s /opt/factored-tls/key.pem ]; then
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 2 -nodes \
     -keyout /opt/factored-tls/key.pem -out /opt/factored-tls/cert.pem \
     -subj "/CN=${PUBLIC_IP}" \
-    -addext "subjectAltName=IP:${PUBLIC_IP},DNS:${PUBLIC_HOST}" 2>/dev/null
+    -addext "subjectAltName=IP:${PUBLIC_IP}" 2>/dev/null
   chmod 600 /opt/factored-tls/key.pem
 fi
+cat > /usr/local/bin/factored-renew-tls <<'EOF'
+#!/bin/bash
+set -euo pipefail
+TOKEN=$(curl -fsS -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+PUBLIC_IP=$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+mkdir -p /opt/factored-tls/acme /opt/factored-tls/letsencrypt /opt/factored-tls/letsencrypt-lib
+if ! docker image inspect certbot/certbot >/dev/null 2>&1; then
+  docker pull certbot/certbot
+fi
+LIVE="/opt/factored-tls/letsencrypt/live/${PUBLIC_IP}"
+need_issue=1
+if [ -f "${LIVE}/fullchain.pem" ] \
+  && openssl x509 -in "${LIVE}/fullchain.pem" -noout -checkend 172800 >/dev/null 2>&1 \
+  && openssl x509 -in "${LIVE}/fullchain.pem" -noout -ext subjectAltName 2>/dev/null \
+    | grep -q "IP Address:${PUBLIC_IP}"; then
+  need_issue=0
+fi
+if [ "$need_issue" = 1 ]; then
+  for _ in $(seq 1 30); do
+    if curl -sS -m 2 -o /dev/null http://127.0.0.1/.well-known/acme-challenge/; then
+      break
+    fi
+    sleep 1
+  done
+  docker run --rm --name factored-certbot \
+    -v /opt/factored-tls/letsencrypt:/etc/letsencrypt \
+    -v /opt/factored-tls/letsencrypt-lib:/var/lib/letsencrypt \
+    -v /opt/factored-tls/acme:/var/www/acme \
+    certbot/certbot certonly --webroot -w /var/www/acme \
+    --preferred-profile shortlived \
+    --ip-address "$PUBLIC_IP" \
+    --cert-name "$PUBLIC_IP" \
+    --non-interactive --agree-tos --register-unsafely-without-email \
+    --force-renewal
+else
+  docker run --rm --name factored-certbot \
+    -v /opt/factored-tls/letsencrypt:/etc/letsencrypt \
+    -v /opt/factored-tls/letsencrypt-lib:/var/lib/letsencrypt \
+    -v /opt/factored-tls/acme:/var/www/acme \
+    certbot/certbot renew --non-interactive
+fi
+CONF="/opt/factored-tls/letsencrypt/renewal/${PUBLIC_IP}.conf"
+if [ -f "$CONF" ] && grep -q '^renew_before_expiry' "$CONF"; then
+  sed -i 's/^renew_before_expiry.*/renew_before_expiry = 2 days/' "$CONF"
+fi
+cat "${LIVE}/fullchain.pem" > /opt/factored-tls/cert.pem
+cat "${LIVE}/privkey.pem" > /opt/factored-tls/key.pem
+chmod 644 /opt/factored-tls/cert.pem
+chmod 600 /opt/factored-tls/key.pem
+if docker inspect factored-https >/dev/null 2>&1; then
+  docker exec factored-https nginx -s reload
+fi
+EOF
+chmod 755 /usr/local/bin/factored-renew-tls
+cat > /etc/systemd/system/factored-renew-tls.service <<'EOF'
+[Unit]
+Description=Renew the BankBot TLS certificate
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/factored-renew-tls
+EOF
+cat > /etc/systemd/system/factored-renew-tls.timer <<'EOF'
+[Unit]
+Description=Daily BankBot TLS renewal
+[Timer]
+OnCalendar=daily
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+cat > /etc/systemd/system/factored-renew-tls-boot.service <<'EOF'
+[Unit]
+Description=Refresh the BankBot TLS certificate after boot
+After=docker.service
+Wants=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/factored-renew-tls
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now factored-renew-tls.timer
+systemctl enable factored-renew-tls-boot.service
 if ! docker image inspect nginx:1.27-alpine >/dev/null 2>&1; then
   docker pull nginx:1.27-alpine
 fi
@@ -153,16 +229,17 @@ docker run -d --name factored-https --restart unless-stopped --network host \
   -v /opt/factored-tls/default.conf:/etc/nginx/conf.d/default.conf:ro \
   -v /opt/factored-tls/cert.pem:/etc/nginx/tls/server.crt:ro \
   -v /opt/factored-tls/key.pem:/etc/nginx/tls/server.key:ro \
+  -v /opt/factored-tls/acme:/var/www/acme:ro \
   nginx:1.27-alpine >/dev/null
+factored-renew-tls
 https_ok=0
 for _ in $(seq 1 15); do
-  if curl -kfsS -m 5 https://127.0.0.1/ -o /dev/null; then
+  if curl -fsS -m 5 --resolve "${PUBLIC_IP}:443:127.0.0.1" "https://${PUBLIC_IP}/" -o /dev/null; then
     https_ok=1
     break
   fi
-  sleep 1
+  sleep 2
 done
 test "$https_ok" = 1
 echo "App:      https://${PUBLIC_IP}/"
-echo "App HTTP: http://${PUBLIC_IP}:8000/"
 echo "Langfuse: http://${PUBLIC_IP}:3000/"
