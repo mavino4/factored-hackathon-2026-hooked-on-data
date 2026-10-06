@@ -39,6 +39,18 @@ class Settings(BaseSettings):
     # Send the session cookie only over HTTPS. Always on in production; off by default
     # elsewhere so plain-HTTP local setups work.
     session_cookie_secure: bool = False
+    # Successful password sign-ins are emailed here. Empty disables the notice.
+    login_notify_emails: list[str] = [
+        "trinogutz@gmail.com",
+        "marco.antonio.vino@gmail.com",
+    ]
+    # SMTP for those notices. Unset host or from address: sign-in works, no email is sent.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from: str | None = None
+    smtp_tls: bool = True
 
     # The UI's quick actions ("Frequent questions", agent/quick.py). "model": classified like
     # any message; "intent": the button gives the intent (no classifier), the model answers;
