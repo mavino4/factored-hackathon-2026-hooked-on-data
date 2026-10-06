@@ -121,5 +121,48 @@ for _ in $(seq 1 20); do
   sleep 2
 done
 test "$ok" = 1
-echo "App:      http://${PUBLIC_IP}:8000/"
+
+# HTTPS so the browser treats the page as a secure context (microphone).
+# The public address changes on stop/start, so the certificate is reissued then.
+PUBLIC_HOST=$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-hostname)
+mkdir -p /opt/factored-tls
+if [ ! -f /opt/factored-tls/default.conf ]; then
+  echo "missing /opt/factored-tls/default.conf (deploy/nginx.ec2.conf)" >&2
+  exit 1
+fi
+need_cert=1
+if [ -f /opt/factored-tls/cert.pem ] && [ -f /opt/factored-tls/key.pem ]; then
+  if openssl x509 -in /opt/factored-tls/cert.pem -noout -checkend 604800 >/dev/null 2>&1 \
+    && openssl x509 -in /opt/factored-tls/cert.pem -noout -ext subjectAltName 2>/dev/null \
+      | grep -q "IP Address:${PUBLIC_IP}"; then
+    need_cert=0
+  fi
+fi
+if [ "$need_cert" = 1 ]; then
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 90 -nodes \
+    -keyout /opt/factored-tls/key.pem -out /opt/factored-tls/cert.pem \
+    -subj "/CN=${PUBLIC_IP}" \
+    -addext "subjectAltName=IP:${PUBLIC_IP},DNS:${PUBLIC_HOST}" 2>/dev/null
+  chmod 600 /opt/factored-tls/key.pem
+fi
+if ! docker image inspect nginx:1.27-alpine >/dev/null 2>&1; then
+  docker pull nginx:1.27-alpine
+fi
+docker rm -f factored-https >/dev/null 2>&1 || true
+docker run -d --name factored-https --restart unless-stopped --network host \
+  -v /opt/factored-tls/default.conf:/etc/nginx/conf.d/default.conf:ro \
+  -v /opt/factored-tls/cert.pem:/etc/nginx/tls/server.crt:ro \
+  -v /opt/factored-tls/key.pem:/etc/nginx/tls/server.key:ro \
+  nginx:1.27-alpine >/dev/null
+https_ok=0
+for _ in $(seq 1 15); do
+  if curl -kfsS -m 5 https://127.0.0.1/ -o /dev/null; then
+    https_ok=1
+    break
+  fi
+  sleep 1
+done
+test "$https_ok" = 1
+echo "App:      https://${PUBLIC_IP}/"
+echo "App HTTP: http://${PUBLIC_IP}:8000/"
 echo "Langfuse: http://${PUBLIC_IP}:3000/"

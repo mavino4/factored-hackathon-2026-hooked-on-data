@@ -106,6 +106,11 @@ class BackendStack(Stack):
             ec2.Port.tcp(3000),
             "Langfuse",
         )
+        security_group.add_ingress_rule(
+            ec2.Peer.any_ipv4(),
+            ec2.Port.tcp(443),
+            "HTTPS so the browser allows the microphone",
+        )
 
         instance = ec2.Instance(
             self,
@@ -175,6 +180,20 @@ class BackendStack(Stack):
             "BackendUrlHost",
             value="http://" + instance.instance_public_dns_name + ":8000/",
             description="Application URL using the public DNS name",
+        )
+
+        cdk.CfnOutput(
+            self,
+            "BackendHttpsUrlIp",
+            value="https://" + instance.instance_public_ip + "/",
+            description="Application HTTPS URL using the public IP",
+        )
+
+        cdk.CfnOutput(
+            self,
+            "BackendHttpsUrlHost",
+            value="https://" + instance.instance_public_dns_name + "/",
+            description="Application HTTPS URL using the public DNS name",
         )
 
         cdk.CfnOutput(

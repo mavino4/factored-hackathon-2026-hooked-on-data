@@ -48,10 +48,12 @@ jobs:
             --output text)
           COMPOSE_B64=$(base64 -w0 deploy/langfuse/docker-compose.yml)
           SCRIPT_B64=$(base64 -w0 deploy/ec2-start.sh)
+          NGINX_B64=$(base64 -w0 deploy/nginx.ec2.conf)
           cat > /tmp/remote.sh <<EOF
           set -euo pipefail
-          mkdir -p /opt/langfuse
+          mkdir -p /opt/langfuse /opt/factored-tls
           echo ${COMPOSE_B64} | base64 -d > /opt/langfuse/docker-compose.yml
+          echo ${NGINX_B64} | base64 -d > /opt/factored-tls/default.conf
           echo ${SCRIPT_B64} | base64 -d > /opt/langfuse/ec2-start.sh
           chmod +x /opt/langfuse/ec2-start.sh
           export IMAGE='${IMAGE}' AWS_REGION='${AWS_REGION}' ECR_REGISTRY='${ECR_REGISTRY}'
@@ -114,7 +116,11 @@ jobs:
             --stack-name BackendStack \
             --query "Stacks[0].Outputs[?OutputKey=='LangfuseUrlHost'].OutputValue" \
             --output text)
+          HTTPS_IP=$(printf '%s' "$URL_IP" | sed -E 's#https?://##; s#:8000/?##')
+          HTTPS_HOST=$(printf '%s' "$URL_HOST" | sed -E 's#https?://##; s#:8000/?##')
           echo "App URL (IP):      $URL_IP"
           echo "App URL (host):    $URL_HOST"
+          echo "App HTTPS (IP):    https://${HTTPS_IP}/"
+          echo "App HTTPS (host):  https://${HTTPS_HOST}/"
           echo "Langfuse URL (IP):   $LF_IP"
           echo "Langfuse URL (host): $LF_HOST"
