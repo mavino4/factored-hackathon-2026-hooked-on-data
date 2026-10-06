@@ -31,6 +31,7 @@ from aiplatform.accounts import (
     InvalidCredentials,
     WeakPassword,
 )
+from aiplatform.mail import send_login_notice
 from aiplatform.agent.actions import ActionNotPending, InMemoryActionStore
 from aiplatform.agent.classifiers.jev import JevClassifier
 from aiplatform.agent.handoffs import HandoffNotFound, InMemoryHandoffStore
@@ -336,6 +337,8 @@ def create_app(settings: Settings | None = None, gateway: AIGateway | None = Non
         except InvalidCredentials:
             # One answer for every failure: unknown user, wrong password, locked, disabled.
             raise HTTPException(401, "invalid username or password") from None
+        await asyncio.to_thread(
+            send_login_notice, settings, username=principal.user_id, ip=ip)
         # HttpOnly: page scripts can't read it. SameSite=Strict: other sites can't send it.
         response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="strict",
                             secure=settings.session_cookie_secure, path="/",
