@@ -52,7 +52,7 @@ def test_notice_names_the_user_and_both_addresses():
     assert len(SENT) == 1
     body = SENT[0].get_content()
     assert "ana" in body and "203.0.113.8" in body and PASSWORD not in body
-    assert SENT[0]["To"] == "trinogutz@gmail.com, marco.antonio.vino@gmail.com"
+    assert SENT[0]["To"] == "omargutz@gmail.com, marco.antonio.vino@gmail.com"
 
 
 def test_a_wrong_password_does_not_send(monkeypatch):

@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = False
     # Successful password sign-ins are emailed here. Empty disables the notice.
     login_notify_emails: list[str] = [
-        "trinogutz@gmail.com",
+        "omargutz@gmail.com",
         "marco.antonio.vino@gmail.com",
     ]
     # SMTP for those notices. Unset host or from address: sign-in works, no email is sent.
