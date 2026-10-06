@@ -34,6 +34,15 @@ docker run --rm --network factored \
   -e AIP_DATABASE_URL=postgresql+asyncpg://aiplatform:aiplatform@factored-db:5432/aiplatform \
   "$IMAGE" /app/.venv/bin/alembic upgrade head
 
+mkdir -p /opt/factored-demo-passwords
+chmod 700 /opt/factored-demo-passwords
+docker run --rm --user root --network factored \
+  --entrypoint /app/.venv/bin/python \
+  -v /opt/factored-demo-passwords:/secrets \
+  -e APP_URL=postgresql://aiplatform:aiplatform@factored-db:5432/aiplatform \
+  -e BANK_URL=postgresql://aiplatform:aiplatform@factored-db:5432/bank \
+  "$IMAGE" /app/seed_demo_users.py
+
 if ! docker compose version >/dev/null 2>&1; then
   mkdir -p /usr/libexec/docker/cli-plugins /usr/local/lib/docker/cli-plugins
   curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
@@ -100,7 +109,8 @@ docker create --name factored-backend --restart unless-stopped \
   --network factored -p 8000:8000 \
   "${env_file[@]}" \
   -e AIP_ENV=dev \
-  -e AIP_AUTH_MODE=dev \
+  -e AIP_AUTH_MODE=password \
+  -e AIP_SESSION_COOKIE_SECURE=true \
   -e AIP_DATABASE_URL=postgresql+asyncpg://aiplatform:aiplatform@factored-db:5432/aiplatform \
   -e AIP_BANK_DATABASE_URL=postgresql+asyncpg://bank_reader:bank_reader@factored-db:5432/bank \
   -e LANGFUSE_TRACING_ENABLED=true \

@@ -7,6 +7,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 COPY alembic.ini ./
 COPY migrations ./migrations
+COPY scripts/seed_demo_users.py ./seed_demo_users.py
+COPY deploy/bankdb/demo_logins.json ./demo_logins.json
 RUN uv sync --frozen --no-dev
 RUN useradd --create-home app
 USER app
